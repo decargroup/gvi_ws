@@ -131,14 +131,14 @@ class GVI:
 
 def cost_function_1D(vec_x):
     x = vec_x[0,0]
-    mu_x = 20
+    mu_x = 22
     f = 400
     b = 0.1
     sig_y_sq = 0.09
     sig_x_sq = 9
 
     # y should be sampled. For a single trial, just give it a value.
-    y = f * b / mu_x - 0.8
+    y = f * b / mu_x - 0.55
 
     return ((x - mu_x)**2 / (2 * sig_x_sq) + (y - f * b / x)**2 / (2 * sig_y_sq))
 
@@ -157,14 +157,14 @@ def cost_function_2D(x:np.ndarray):
     return phi_x + phi_y
     
 # %%
-gvi = GVI(num_states=1, state_dim=1, gh_degree=4, phi_function=cost_function_1D)
+gvi = GVI(num_states=1, state_dim=1, gh_degree=3, phi_function=cost_function_1D)
 covar_0 = np.diag([1/9])
 mean_0 = np.array([[20]])
 gvi.set_initial(mean_0, covar_0=covar_0)
 mean_pred, covar_pred = gvi.run()
 
 # %%
-gvi = GVI(num_states=1, state_dim=2, gh_degree=4, phi_function=cost_function_2D)
+gvi = GVI(num_states=1, state_dim=2, gh_degree=3, phi_function=cost_function_2D)
 covar_0 = np.diag([2, 1.5])
 mean_0 = np.array([[2.2],[1.2]])
 gvi.set_initial(mean_0, covar_0=covar_0)
