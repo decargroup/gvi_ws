@@ -36,26 +36,30 @@ class GVI:
         self.information = np.linalg.inv(self.covariance)
         self._sqrt_cov = np.linalg.cholesky(self.covariance)
         return
+    
 
     def run(self):
         n_iters = 0
         # print(self.mu.shape)
         while(True):
+            # Initial Cost
+            init_cost = self.eval_cost_func()
+            
+            
+            # Calc Gradients
             information_new = self.comp_phi_ddx()
-            # information_new = self._force_psd(information_new)
+            information_new = self._force_psd(information_new)
             covariance_new = np.linalg.inv(information_new)
             covariance_new = self._force_psd(covariance_new)
-            delta_info = np.linalg.det(covariance_new@self.information)
             sqrt_cov_new = np.linalg.cholesky(covariance_new)
+            
+
+            # Compute Deltas
             info_close = np.allclose(information_new, self.information)
-            # Update
+            delta_info = information_new - self.information
+            delta_covar = covariance_new - self.covariance
             delta_mu = - covariance_new @ self.comp_phi_dx()
             self.mu += delta_mu
-            
-            self.information = information_new
-            self.covariance = covariance_new
-            self._sqrt_cov = sqrt_cov_new
-            
             
             if abs(np.linalg.norm(delta_mu))<1e-6 and info_close:
                 print(n_iters)
@@ -65,15 +69,34 @@ class GVI:
                 print(delta_mu)
                 print(delta_info)
                 break
+            # Backtracking Line Search
+            # New Cost
+            new_cost = np.copy(init_cost)
+            
+            # alpha = 1
+            
+            # while new_cost >= init_cost:
+            #     # Update 
+            #     self.mu += alpha*delta_mu
+            #     self.information+= alpha*delta_info
+            #     self.covariance = alpha*delta_covar
+            #     self.covariance = self._force_psd(self.covariance)
+            #     self._sqrt_cov = sqrt_cov_new
+            #     # Calc New Cost
+            #     new_cost = self.eval_cost_func()
+            #     alpha *= 0.9
+            #     print(alpha)
+            
             n_iters += 1
             print(self.mu)
             print(self.covariance)
             print(n_iters, '\n ----------------- \n')
         return self.mu, self.covariance
 
-    def cost_func(self):
+    def eval_cost_func(self):
         a = - self.comp_phi()
         b = 0.5 * np.log(np.linalg.det(self.information))
+        return a + b
 
     def _gh_integrate(self, expect_func:Callable):
         unit_sigma_pts, weights = gh_cubature_nav(p=self._gh_degree, dof=self._gh_dim)
@@ -126,49 +149,3 @@ class GVI:
         psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
         sym = 0.5 * (psd + psd.T)
         return sym
-
-
-
-def cost_function_1D(vec_x):
-    x = vec_x[0,0]
-    mu_x = 20
-    f = 400
-    b = 0.1
-    sig_y_sq = 0.09
-    sig_x_sq = 9
-
-    # y should be sampled. For a single trial, just give it a value.
-    y = f * b / mu_x - 0.8
-
-    return ((x - mu_x)**2 / (2 * sig_x_sq) + (y - f * b / x)**2 / (2 * sig_y_sq))
-
-def cost_function_2D(x:np.ndarray):
-    height=7 
-    distance=3
-    range_measure = lambda x: np.sqrt(np.square(x[0] + distance) + np.square(height))
-    expect_x = np.array([[2],[1]])
-    expect_y = y = np.array([[8.6]])
-    Q = np.diag([0.2, 0.2])
-    R = np.eye(1)*0.1
-    # y = range_measure(expect_x) + np.sqrt(var_y)*np.random.randn(var_y.shape[0], var_y.shape[1])
-    y = np.array([[8.4]])
-    phi_x = 0.5 * (x - expect_x).T @ np.linalg.inv(Q) @ (x - expect_x)
-    phi_y = 0.5 * (y - expect_y).T @ np.linalg.inv(R) @ (y - expect_y)
-    return phi_x + phi_y
-    
-# %%
-gvi = GVI(num_states=1, state_dim=1, gh_degree=4, phi_function=cost_function_1D)
-covar_0 = np.diag([1/9])
-mean_0 = np.array([[20]])
-gvi.set_initial(mean_0, covar_0=covar_0)
-mean_pred, covar_pred = gvi.run()
-
-# %%
-gvi = GVI(num_states=1, state_dim=2, gh_degree=4, phi_function=cost_function_2D)
-covar_0 = np.diag([2, 1.5])
-mean_0 = np.array([[2.2],[1.2]])
-gvi.set_initial(mean_0, covar_0=covar_0)
-mean_pred, covar_pred = gvi.run()
-
-
-# %%
