@@ -36,26 +36,31 @@ class GVI:
         self.information = np.linalg.inv(self.covariance)
         self._sqrt_cov = np.linalg.cholesky(self.covariance)
         return
+    
 
     def run(self):
         n_iters = 0
         # print(self.mu.shape)
         while(True):
+            
+            # Initial Vars + Cost
+            init_cost = np.copy(self.eval_cost_func()[0,0])
+            init_information = self.information.copy()
+            init_covariance = self.covariance.copy()
+            init_mu = self.mu.copy()
+
+            # Calc Gradients
             information_new = self.comp_phi_ddx()
-            # information_new = self._force_psd(information_new)
+            information_new = self._force_psd(information_new)
             covariance_new = np.linalg.inv(information_new)
             covariance_new = self._force_psd(covariance_new)
-            delta_info = np.linalg.det(covariance_new@self.information)
             sqrt_cov_new = np.linalg.cholesky(covariance_new)
+            
+            # Compute Deltas
             info_close = np.allclose(information_new, self.information)
-            # Update
+            delta_info = information_new - self.information
+            delta_covar = covariance_new - self.covariance
             delta_mu = - covariance_new @ self.comp_phi_dx()
-            self.mu += delta_mu
-            
-            self.information = information_new
-            self.covariance = covariance_new
-            self._sqrt_cov = sqrt_cov_new
-            
             
             if abs(np.linalg.norm(delta_mu))<1e-6 and info_close:
                 print(n_iters)
@@ -65,15 +70,46 @@ class GVI:
                 print(delta_mu)
                 print(delta_info)
                 break
+
+            # Update
+            self.information = information_new
+            self.covariance = covariance_new
+            self._sqrt_cov = sqrt_cov_new
+            self.mu += delta_mu
+
+            # Backtracking Line Search
+            new_cost = self.eval_cost_func()[0,0]
+            alpha = 1
+            print("Initial Cost: ", init_cost)
+            print("New Cost: ", new_cost)
+            while new_cost > init_cost and alpha>1e-12:
+                # Update 
+                alpha *= 0.95
+                self.mu = init_mu +  alpha*delta_mu
+                self.information = init_information + alpha*delta_info
+                self.information = self._force_psd(self.information)
+                self.covariance = init_covariance + alpha*delta_covar
+                self.covariance = self._force_psd(self.covariance)
+                # self._sqrt_cov = sqrt_cov_new
+                # Calc New Cost
+                new_cost = self.eval_cost_func()[0,0]
+                print(alpha)
+                print("Initial Cost: ", init_cost)
+                print("New Cost: ", new_cost)
+                if np.abs(new_cost - init_cost)< 1e-6:
+                    break
+            
             n_iters += 1
             print(self.mu)
             print(self.covariance)
             print(n_iters, '\n ----------------- \n')
+        
         return self.mu, self.covariance
 
-    def cost_func(self):
+    def eval_cost_func(self):
         a = - self.comp_phi()
         b = 0.5 * np.log(np.linalg.det(self.information))
+        return a + b
 
     def _gh_integrate(self, expect_func:Callable):
         unit_sigma_pts, weights = gh_cubature_nav(p=self._gh_degree, dof=self._gh_dim)
@@ -120,7 +156,7 @@ class GVI:
         return expect
     
     def _force_psd(self, matrix):
-        eigvals, eigvecs = np.linalg.eig(matrix.T)
+        eigvals, eigvecs = np.linalg.eig(matrix)
         # print(eigvals)
         eigvals[eigvals <= 0] = 1e-10  # Adjust negative eigenvalues
         psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
