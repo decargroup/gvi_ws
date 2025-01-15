@@ -1,8 +1,8 @@
 # %%
 import numpy as np
 import navlie as nav
+import matplotlib.pyplot as plt
 from typing import Callable, Optional, List
-
 from gh_quad_ex import gh_cubature_nav, gh_cubature
 
 from math import factorial
@@ -10,6 +10,14 @@ import itertools
 from numpy.polynomial.hermite_e import hermeroots
 from scipy.stats.distributions import chi2
 from scipy.special import eval_hermitenorm
+from scipy.stats import norm, t
+
+# Plotting parameters
+plt.rc('text', usetex=True)
+plt.rc('font', family='serif', size=14)
+plt.rc('lines', linewidth=2)
+plt.rc('axes', grid=True)
+plt.rc('grid', linestyle='--')
 
 
 class GVI:
@@ -126,6 +134,7 @@ class GVI:
     def phi_dx_dx(self):
         # TODO: Change this for information_k
         a = self.information @ self._expect_mu_mu_phi() @ self.information
+        # TODO: Change below to "@" instead of "*"?
         b = self.information * self._expect_phi()
         if np.linalg.norm(np.abs(a-b)) < 1e-8:
             print("Information: ", self.information)
@@ -176,18 +185,40 @@ def cost_function_2D(x:np.ndarray):
     phi_y = 0.5 * (y - expect_y).T @ np.linalg.inv(R) @ (y - expect_y)
     return phi_x + phi_y
     
-# # %%
+# %%
 gvi = GVI(num_states=1, state_dim=1, gh_degree=3, phi_function=cost_function_1D)
 covar_0 = np.diag([9.1])
 mean_0 = np.array([[20]])
 gvi.set_initial(mean_0, covar_0=covar_0)
 mean_pred, covar_pred = gvi.run(debug=True)
 
+mean_pred = mean_pred[0,0]
+covar_pred = covar_pred[0,0]
+x_plot = np.linspace(mean_pred-3*np.sqrt(covar_pred), mean_pred + 3*np.sqrt(covar_pred), 500)
+pdf = norm.pdf(x_plot, mean_pred, np.sqrt(covar_pred))
+# true_post = t.pdf(x_plot, 5, loc=24.7770, scale=2.1)
+true_post = t.pdf(x_plot, 5, loc=24.7770, scale=2.1)
+plt.plot(x_plot, true_post, label=r"$p(x|y)$", color='blue')
+plt.plot(x_plot, pdf, label=r"$\hat{x}_{gvi}$", linestyle='--', color='orange')
+plt.axvline(x=24.5694, color='red', linestyle='--', linewidth=2, label=r"$\hat{x}_{map}$")
+plt.axvline(x=24.777, color='blue', linestyle=':', linewidth=2, label=r"$\bar{x}$")
+# plt.axvline(x=mean_pred, color='orange', linestyle=':', linewidth=2)
+plt.xlabel("x [m]")
+plt.ylabel("p")
+plt.legend()
+plt.grid()
+plt.savefig("/home/astirl/Documents/courses/assignments/mech_642/pres_ws/figs/result.pdf")
+plt.show()
+
+
 # %%
-gvi = GVI(num_states=1, state_dim=2, gh_degree=3, phi_function=cost_function_2D)
-covar_0 = np.diag([2, 1.5])
-mean_0 = np.array([[2.2],[1.2]])
-gvi.set_initial(mean_0, covar_0=covar_0)
-mean_pred, covar_pred = gvi.run(debug=True)
+# gvi = GVI(num_states=1, state_dim=2, gh_degree=3, phi_function=cost_function_2D)
+# covar_0 = np.diag([2, 1.5])
+# mean_0 = np.array([[2.2],[1.2]])
+# gvi.set_initial(mean_0, covar_0=covar_0)
+# mean_pred, covar_pred = gvi.run(debug=True)
+
+# %%
 
 
+# %%
