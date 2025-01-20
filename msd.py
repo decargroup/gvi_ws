@@ -216,4 +216,4 @@ if __name__=="__main__":
     ax[1].set_ylabel(r'$u^{acc}(t)$ ($\frac{m}{s^2}$)')
     ax[1].set_xlabel(r'$t$ (s)')    
     ax[1].scatter(Simulation.time,measured_acc, s=0.05)
-# %%
+    # %%

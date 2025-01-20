@@ -48,6 +48,7 @@ class FactoredState:
     
     def set_input_phi(self, u:Input, process_model:ProcessModel, prev_state:'FactoredState'):
         self.can_eval_input = True
+        self.projection_matrix = np.eye(2*self._dof)
         self.type += "input"
         self._u = u.copy()
         self._u.value = u.value.copy()
@@ -72,11 +73,16 @@ class FactoredState:
         # self._P0_check_inv = (np.linalg.inv(x0.covariance))
         
     def update_factored_state(self, total_mean:np.ndarray, information:np.ndarray):
-        self.state_covar.state.value = (self.projection_matrix @ total_mean).ravel()
-        self.information = self.projection_matrix @ information @ self.projection_matrix.T
-        # P = scipy.linalg.inv(information)
-        # self.state_covar.covariance = self.projection_matrix @ P @ self.projection_matrix.T
-        self.state_covar.covariance = force_PSD(scipy.linalg.inv(self.information))
+        P = force_PSD(scipy.linalg.inv(information))
+        if self.can_eval_input:
+            self.state_covar.state.value = (self.projection_matrix @ total_mean)[self._dof:].ravel()
+            self.information = (self.projection_matrix @ information @ self.projection_matrix.T)[self._dof:, self._dof:]
+            self.state_covar.covariance = (self.projection_matrix @ P @ self.projection_matrix.T)[self._dof:, self._dof:]
+        else:
+            self.state_covar.state.value = (self.projection_matrix @ total_mean).ravel()
+            self.information = (self.projection_matrix @ information @ self.projection_matrix.T)
+            self.state_covar.covariance = self.projection_matrix @ P @ self.projection_matrix.T
+                
         self.generate_new_sigma_pts()
         return
     
@@ -156,6 +162,8 @@ class FactoredState:
         for i, w in enumerate(self._weights):
             expect += w * (self._sigma_pts[i] - mu) @ (self._sigma_pts[i] - mu).T  * self._eval_phi(self._sigma_pts[i])
         if self.can_eval_input:
+            z_block = np.zeros((self._dof, self._dof))
+            expect = np.block([[z_block, z_block],[z_block, expect.copy()]])
             mu_p = np.vstack((self._prev_state.value.reshape((-1,1)), self.state_covar.state.value.reshape((-1,1))))
             for i, w in enumerate(self._prior_weights):
                 phi = self._eval_input_phi(self._prior_sigma_pts[i])
@@ -172,6 +180,7 @@ class FactoredState:
             phi = self._eval_phi(self._sigma_pts[i])
             expect += w * (self._sigma_pts[i] - mu) * phi
         if self.can_eval_input:
+            expect = np.vstack((np.zeros((self._dof, 1)), expect.copy()))
             mu_p = np.vstack((self._prev_state.value.reshape((-1,1)), self.state_covar.state.value.reshape((-1,1))))
             for i, w in enumerate(self._prior_weights):
                 phi= self._eval_input_phi(self._prior_sigma_pts[i])
@@ -185,6 +194,7 @@ class FactoredState:
             expect += w * self._eval_phi(self._sigma_pts[i]) 
         
         if self.can_eval_input:
+            
             for i, w in enumerate(self._prior_weights):
                 phi = self._eval_input_phi(self._prior_sigma_pts[i])
                 expect += w * phi 
@@ -441,7 +451,7 @@ Simulation.set_forcing_function(f)
 # Generating ground truth
 true_pos, true_vel, true_acc = Simulation.generate_ground_truth()
 
-Simulation.generate_measurements(sigma_acc=sigma_acc_continuous, pos_freq=laser_range_freq, acc_freq=imu_freq, meas_model=laser_range)
+_,_,_ = Simulation.generate_measurements(sigma_acc=sigma_acc_continuous, pos_freq=laser_range_freq, acc_freq=imu_freq, meas_model=laser_range)
 
 # %%
 ## GVI SETUP ##
@@ -452,7 +462,7 @@ x0 = VectorState(value=np.array(x0_val), stamp=gt_data[0].stamp)
 dt = 1 / imu_freq
 Q_d = np.array([[sigma_acc_continuous**2 / dt]])
 proc_model = DoubleIntegrator(Q_d)
-P0 = np.eye(2) * 1e-1
+P0 = np.eye(2) * 1e-5
 if NOISE_ON:
     x0 = x0.plus(nav.randvec(P0))
 x0 = StateWithCovariance(state=VectorState(value=np.array(x0_val), stamp=gt_data[0].stamp), covariance=P0)
