@@ -79,24 +79,20 @@ def gh_cubature_nav(p, dof):
     return sigma_points, w
 
 def gh_cubature(order_p, state_dof):
-    # TODO: Fix if state_dof > 2
-    if state_dof > 2:
-        raise NotImplemented
     hermite_poly = compute_hermite(order_p)
     unit_sigma_points = np.roots(hermite_poly)
     unit_sigma_points_stack = np.zeros((order_p**state_dof, state_dof))
     # Form cartesian product of sigma points
     count = 0
-    for s1, s2 in itertools.product(unit_sigma_points, unit_sigma_points):
-        unit_sigma_points_stack[count, :] = np.array([s1, s2])
-        count +=1
-    
+    for x in itertools.product(unit_sigma_points, repeat=state_dof):
+            unit_sigma_points_stack[count, :] = np.array(x)
+            count +=1
     # Form weights from multiplying cartesian product of sigma point weights together
-    weights = compute_weight(pth_order, unit_sigma_points)
-    weights_stack = np.zeros(pth_order**dof)
+    weights = compute_weight(order_p, unit_sigma_points)
+    weights_stack = np.zeros(order_p**state_dof)
     count = 0
-    for w_1, w_2 in itertools.product(weights, weights):
-        weights_stack[count] = w_1 * w_2
+    for ws in itertools.product(weights, repeat=state_dof):
+        weights_stack[count] = np.prod(ws)
         count += 1
     return unit_sigma_points_stack, weights_stack
 

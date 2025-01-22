@@ -1,15 +1,23 @@
 # %%
 import numpy as np
 import navlie as nav
+import matplotlib.pyplot as plt
 from typing import Callable, Optional, List
-
-from gh_quad_ex import gh_cubature_nav
+from gh_quad_ex import gh_cubature_nav, gh_cubature
 
 from math import factorial
 import itertools
 from numpy.polynomial.hermite_e import hermeroots
 from scipy.stats.distributions import chi2
 from scipy.special import eval_hermitenorm
+from scipy.stats import norm, t
+
+# Plotting parameters
+plt.rc('text', usetex=True)
+plt.rc('font', family='serif', size=14)
+plt.rc('lines', linewidth=2)
+plt.rc('axes', grid=True)
+plt.rc('grid', linestyle='--')
 
 
 class GVI:
@@ -27,8 +35,10 @@ class GVI:
         self._sqrt_cov = np.linalg.cholesky(self.covariance)
         
         # Gauss-Hermite Integration Setup
-        self._gh_dim = self.state_dim ** self.num_states
+        # Only need at x_k dimension
+        self._gh_dim = self.state_dim
         self._gh_degree = gh_degree
+        self._unit_sigma_pts, self._weights = gh_cubature(order_p=self._gh_degree, state_dof=self._gh_dim)
 
     def set_initial(self, mu_0:np.ndarray, covar_0:np.ndarray):
         self.mu = mu_0.reshape((-1,1)).astype(np.float64)
@@ -36,88 +46,108 @@ class GVI:
         self.information = np.linalg.inv(self.covariance)
         self._sqrt_cov = np.linalg.cholesky(self.covariance)
         return
+    
 
-    def run(self):
-        n_iters = 0
+    def run(self, debug=False):
+        n_iters = 1
         # print(self.mu.shape)
         while(True):
-            information_new = self.comp_phi_ddx()
-            # information_new = self._force_psd(information_new)
-            covariance_new = np.linalg.inv(information_new)
-            covariance_new = self._force_psd(covariance_new)
-            delta_info = np.linalg.det(covariance_new@self.information)
-            sqrt_cov_new = np.linalg.cholesky(covariance_new)
-            info_close = np.allclose(information_new, self.information)
-            # Update
-            delta_mu = - covariance_new @ self.comp_phi_dx()
-            self.mu += delta_mu
+            # Update section
+
+            # Get new sigma pts centered on current mean
+            self._generate_new_sigma_pts()
+            # Compute new information and covariance
+            new_information = self.phi_dx_dx()
+            new_covariance = np.linalg.inv(new_information)
+            delta_mu = -1 * new_covariance @ self.phi_dx()
+            new_mu = self.mu + delta_mu
             
-            self.information = information_new
-            self.covariance = covariance_new
-            self._sqrt_cov = sqrt_cov_new
-            
-            
-            if abs(np.linalg.norm(delta_mu))<1e-6 and info_close:
-                print(n_iters)
+            # Calculate breaking condition
+            size_mu = np.abs(np.linalg.norm(delta_mu))
+            delta_info = new_covariance @ self.information
+            size_info = np.linalg.norm(new_information - self.information)
+            if size_mu < 1e-6 and size_info < 1e-6:
+                if debug:
+                    print("--------------------------------")
+                    print(f"|  Converged in {n_iters} iterations!  |")
+                    print("--------------------------------")
+
                 break
-            if n_iters > 1000:
-                print(n_iters)
-                print(delta_mu)
-                print(delta_info)
+            if n_iters > 10000:
+                if debug:
+                    print(f"Reached max iterations")
                 break
+            
+            
+            self.information = self._force_psd(new_information)
+            self.covariance = self._force_psd(new_covariance)
+            self.mu = new_mu
+            if debug:
+                print( "########################################")
+                print("Iteration: ", n_iters)
+                print( "----------------------------------------")
+                print("Delta mu: ", delta_mu.T)
+                print("Delta Info: ", delta_info)
+                print("Info_{i+1}: ", self.information)
+                print( "########################################\n")
             n_iters += 1
-            print(self.mu)
-            print(self.covariance)
-            print(n_iters, '\n ----------------- \n')
+                
+
         return self.mu, self.covariance
 
-    def cost_func(self):
-        a = - self.comp_phi()
+    def eval_cost_func(self):
+        # TODO: Check this negative sign !!
+        a = - self._expect_phi()
         b = 0.5 * np.log(np.linalg.det(self.information))
+        return a + b
 
-    def _gh_integrate(self, expect_func:Callable):
-        unit_sigma_pts, weights = gh_cubature_nav(p=self._gh_degree, dof=self._gh_dim)
+    def _generate_new_sigma_pts(self):
         self._sqrt_cov = np.linalg.cholesky(self.covariance)
-        sigma_points = [self.mu.reshape((-1,1)) + self._sqrt_cov @ sp_i.reshape((-1,1)) 
-                for sp_i in unit_sigma_pts.T]
-        expect = expect_func(sigma_points, weights)
+        self._sigma_pts = [self.mu.reshape((-1,1)) + self._sqrt_cov @ sp_i.reshape((-1,1)) 
+                for sp_i in self._unit_sigma_pts]
+        return
+    
+    def _expect_phi(self):
+        # Scalar
+        expect = 0
+        for i, w in enumerate(self._weights):
+            expect += w * self._phi_func(self._sigma_pts[i]) 
         return expect
     
-    def comp_phi(self):
-        return self._gh_integrate(self._expect_phi)
-    
-    def comp_phi_dx(self):
-        return self.information @ self._gh_integrate(self._expect_xmmu_phi)
-    
-    def comp_phi_ddx(self):
-        a = self.information @ self._gh_integrate(self._expect_xmmu_2_phi) @ self.information
-        b = self.information @ self._gh_integrate(self._expect_phi)
-        return a - b
-    
-    def _expect_phi(self, x_k:List[np.ndarray], weights:List[np.ndarray]):
-        # E_{q_k}[\phi_k (x)k]
-        # TODO: Check dimensions of everything
-        expect = np.zeros_like(x_k[0])
-        for i, w in enumerate(weights):
-            expect += self._phi_func(x_k[i]) * w
+    def _expect_mu_phi(self):
+        # TODO: Change this for mu_k
+        expect = np.zeros_like(self.mu)
+        for i, w in enumerate(self._weights):
+            expect += w * (self._sigma_pts[i] - self.mu) * self._phi_func(self._sigma_pts[i])
         return expect
     
-    def _expect_xmmu_phi(self, x_k:np.ndarray, weights:List[np.ndarray]):
-        # E_{q_k}[(x_k - \mu_k )\phi_k (x)k]
-        # TODO: Check dimensions of what self._phi_func returns
-        expect = np.zeros_like(x_k[0])
-        for i, w in enumerate(weights):
-            expect += w*(x_k[i] - self.mu.reshape((-1,1)))*self._phi_func(x_k[i])
-        return expect
-    
-    def _expect_xmmu_2_phi(self, x_k:np.ndarray, weights:List[np.ndarray]):
+    def _expect_mu_mu_phi(self):
+        # TODO: Change this for information_kk
         expect = np.zeros_like(self.information)
-        # print(np.shape(expect))
-        # print(np.shape(x_k[0] - self.mu))
-        # TODO: Checl dimensions of what self._phi_func
-        for i, w in enumerate(weights):
-            expect += self._force_psd(w*((x_k[i] - self.mu.reshape((-1,1))) @ (x_k[i] - self.mu.reshape((-1,1))).T ) * self._phi_func(x_k[i]))
+        for i, w in enumerate(self._weights):
+            expect += w * (self._sigma_pts[i] - self.mu) @ (self._sigma_pts[i] - self.mu).T  * self._phi_func(self._sigma_pts[i])
         return expect
+    
+    def phi_dx(self):
+        return self.information @ self._expect_mu_phi()
+    
+    def phi_dx_dx(self):
+        # TODO: Change this for information_k
+        a = self.information @ self._expect_mu_mu_phi() @ self.information
+        # TODO: Change below to "@" instead of "*"?
+        b = self.information * self._expect_phi()
+        if np.linalg.norm(np.abs(a-b)) < 1e-8:
+            print("Information: ", self.information)
+            print("Covariance: ",self.covariance)
+            print("Mean: ",self.mu)
+            print("Sigma Points/Weights: ",self._sigma_pts, self._weights)
+            print("Expect (x - mu)(x-mu).T phi(x)", self._expect_mu_mu_phi())
+            print("Expect phi(x)", self._expect_phi())
+            print("a", a)
+            print("b", b)
+            raise ValueError("Information Update is Singular")
+        return a - b
+
     
     def _force_psd(self, matrix):
         eigvals, eigvecs = np.linalg.eig(matrix.T)
@@ -126,7 +156,6 @@ class GVI:
         psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
         sym = 0.5 * (psd + psd.T)
         return sym
-
 
 
 def cost_function_1D(vec_x):
@@ -138,7 +167,7 @@ def cost_function_1D(vec_x):
     sig_x_sq = 9
 
     # y should be sampled. For a single trial, just give it a value.
-    y = f * b / mu_x - 0.8
+    y = f * b / 26 - 0.6
 
     return ((x - mu_x)**2 / (2 * sig_x_sq) + (y - f * b / x)**2 / (2 * sig_y_sq))
 
@@ -147,26 +176,47 @@ def cost_function_2D(x:np.ndarray):
     distance=3
     range_measure = lambda x: np.sqrt(np.square(x[0] + distance) + np.square(height))
     expect_x = np.array([[2],[1]])
-    expect_y = y = np.array([[8.6]])
+    expect_y = range_measure(expect_x)
     Q = np.diag([0.2, 0.2])
     R = np.eye(1)*0.1
     # y = range_measure(expect_x) + np.sqrt(var_y)*np.random.randn(var_y.shape[0], var_y.shape[1])
-    y = np.array([[8.4]])
+    y = np.array([[8.40381514]])
     phi_x = 0.5 * (x - expect_x).T @ np.linalg.inv(Q) @ (x - expect_x)
     phi_y = 0.5 * (y - expect_y).T @ np.linalg.inv(R) @ (y - expect_y)
     return phi_x + phi_y
     
 # %%
-gvi = GVI(num_states=1, state_dim=1, gh_degree=4, phi_function=cost_function_1D)
-covar_0 = np.diag([1/9])
+gvi = GVI(num_states=1, state_dim=1, gh_degree=3, phi_function=cost_function_1D)
+covar_0 = np.diag([9.1])
 mean_0 = np.array([[20]])
 gvi.set_initial(mean_0, covar_0=covar_0)
-mean_pred, covar_pred = gvi.run()
+mean_pred, covar_pred = gvi.run(debug=True)
+
+mean_pred = mean_pred[0,0]
+covar_pred = covar_pred[0,0]
+x_plot = np.linspace(mean_pred-3*np.sqrt(covar_pred), mean_pred + 3*np.sqrt(covar_pred), 500)
+pdf = norm.pdf(x_plot, mean_pred, np.sqrt(covar_pred))
+# true_post = t.pdf(x_plot, 5, loc=24.7770, scale=2.1)
+true_post = t.pdf(x_plot, 5, loc=24.7770, scale=2.1)
+plt.plot(x_plot, true_post, label=r"$p(x|y)$", color='blue')
+plt.plot(x_plot, pdf, label=r"$\hat{x}_{gvi}$", linestyle='--', color='orange')
+plt.axvline(x=24.5694, color='red', linestyle='--', linewidth=2, label=r"$\hat{x}_{map}$")
+plt.axvline(x=24.777, color='blue', linestyle=':', linewidth=2, label=r"$\bar{x}$")
+# plt.axvline(x=mean_pred, color='orange', linestyle=':', linewidth=2)
+plt.xlabel("x [m]")
+plt.ylabel("p")
+plt.legend()
+plt.grid()
+plt.savefig("/home/astirl/Documents/courses/assignments/mech_642/pres_ws/figs/result.pdf")
+plt.show()
+
 
 # %%
-gvi = GVI(num_states=1, state_dim=2, gh_degree=4, phi_function=cost_function_2D)
-covar_0 = np.diag([2, 1.5])
-mean_0 = np.array([[2.2],[1.2]])
-gvi.set_initial(mean_0, covar_0=covar_0)
-mean_pred, covar_pred = gvi.run()
+# gvi = GVI(num_states=1, state_dim=2, gh_degree=3, phi_function=cost_function_2D)
+# covar_0 = np.diag([2, 1.5])
+# mean_0 = np.array([[2.2],[1.2]])
+# gvi.set_initial(mean_0, covar_0=covar_0)
+# mean_pred, covar_pred = gvi.run(debug=True)
+
+# %%
 
