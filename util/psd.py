@@ -54,7 +54,27 @@ def isPD(B):
     except la.LinAlgError:
         return False
     
-def force_PSD(A):
+def regularize(A, cond_threshold=1e12, epsilon=1e-6):
+    """
+    Regularizes a matrix if its condition number is too high.
+
+    Parameters:
+        A (np.ndarray): The input matrix.
+        cond_threshold (float): Threshold for condition number beyond which regularization is applied.
+        epsilon (float): Small value to add to the diagonal for regularization.
+
+    Returns:
+        np.ndarray: The regularized matrix.
+    """
+    cond_number = la.cond(A)
+    if cond_number > cond_threshold or not np.isfinite(cond_number):
+        # print(f"Condition number is too high ({cond_number:.2e}). Regularizing the matrix.")
+        A += epsilon * np.eye(A.shape[0])  # Add small diagonal regularization
+    return A
+    
+def force_PSD(A, cond_threshold=1e12, epsilon=1e-6):
+    
+    A = regularize(A, cond_threshold=cond_threshold, epsilon=epsilon)
     if not isPD(A):
         return nearestPD(A)
     else:

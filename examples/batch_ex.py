@@ -3,8 +3,8 @@ import navlie as nav
 import numpy as np
 import typing
 import matplotlib.pyplot as plt
-from gh_quad_ex import gh_cubature_nav, gh_cubature
-from sp_filter import MassSpringDamper, NonLinearLaserRangeFinder, LaserRangeFinder
+from examples.gh_quad_ex import gh_cubature_nav, gh_cubature
+from examples.sp_filter import MassSpringDamper, NonLinearLaserRangeFinder, LaserRangeFinder
 from navlie.datagen import DataGenerator
 from navlie.lib.states import VectorState, VectorInput
 from navlie.lib.models import RangePointToAnchor

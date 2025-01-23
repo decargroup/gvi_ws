@@ -4,7 +4,7 @@ import scipy as sp
 import navlie as nav
 
 import matplotlib.pyplot as plt
-from msd import Simulator, NonLinearLaserRangeFinder, LaserRangeFinder
+from models import Simulator, NonLinearLaserRangeFinder, LaserRangeFinder
 
 # Navlie Things
 from navlie.lib.states import VectorState, VectorInput
