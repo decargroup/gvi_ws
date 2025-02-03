@@ -3,7 +3,7 @@ import numpy as np
 import navlie as nav
 from scipy import integrate
 from scipy import stats
-from navlie.types import MeasurementModel, State, Measurement
+from navlie.types import MeasurementModel, State, Measurement, ProcessModel
 from navlie.lib.states import VectorState, VectorInput
 
 class LaserRangeFinder(MeasurementModel):
@@ -24,11 +24,23 @@ class NonLinearLaserRangeFinder(MeasurementModel):
 
     def evaluate(self, x: nav.State) -> np.ndarray:
         if x.value[0] + self.distance <= 0:
-            raise ValueError
+            print(f"Mass goes beyond the wall, position: {x.value[0]}")
+            raise ValueError()
         range_measure = np.sqrt(np.square(x.value[0] + self.distance) + np.square(self.height))
         return range_measure
     
     def covariance(self, x: nav.State) -> np.ndarray:
+        return self.R
+    
+class StereoCamera(MeasurementModel):
+    def __init__(self,R_d:np.ndarray,  f=400, b = 0.1):
+        self.R = np.atleast_2d(R_d)
+        self.focal_len = f
+        self.disparity = b
+    def evaluate(self, x:nav.State) -> np.ndarray:
+        y = np.atleast_2d(self.focal_len * self.disparity / x.value[0])
+        return y
+    def covariance(self, x:nav.State) -> np.ndarray: 
         return self.R
 
 class MassSpringDamperSystem:
@@ -106,36 +118,11 @@ class Simulator():
 
         return self.true_position, self.true_velocity, self.true_acceleration
     
-    def generate_linear_measurements(self, sigma_pos, sigma_acc, pos_freq = 100, acc_freq = 100):
-        """
-        Returns:
-
-        """
-        acc_list = []
-        pos_list = []
-        time_list = []
-        sample_every = int((1/self.dt) / pos_freq)
-        for i in range(0,len(self.true_position),sample_every):
-            noisy_pos = self.true_position[i] + sigma_pos*np.random.randn()
-            pos_list.append(noisy_pos)
-            time_list.append(self.time[i])
-
-        sample_every = int((1/self.dt) / acc_freq)
-        Q_d_sim = sigma_acc**2 / self.dt
-        
-        for i in range(0, len(self.true_acceleration),sample_every):
-            noisy_acc = self.true_acceleration[i] + np.sqrt(Q_d_sim)*np.random.randn()
-            acc_list.append(noisy_acc)
-
-        self.measured_position = np.array(pos_list)
-        self.measured_acceleration = np.array(acc_list)
-        self.measured_time = np.array(time_list)
-
-        return self.measured_position, self.measured_acceleration, self.measured_time
     
     def generate_measurements(self, sigma_acc, 
                               pos_freq, acc_freq, 
-                              meas_model:NonLinearLaserRangeFinder):
+                              meas_model:MeasurementModel,
+                              add_noise = True):
         """
         Returns:
 
@@ -149,7 +136,9 @@ class Simulator():
         for i in range(0,len(self.true_position),sample_every):
             meas = meas_model.evaluate(self.gt_data[i])
             pos = meas.ravel()
-            noisy_pos = pos + np.sqrt(meas_model.covariance(self.gt_data[i]))*np.random.randn()
+            noisy_pos = pos
+            if add_noise:
+                noisy_pos += np.sqrt(meas_model.covariance(self.gt_data[i])).ravel()*np.random.randn()
             noisy_meas = Measurement(value=np.array([noisy_pos]), stamp=round(self.time[i], ndigits=4), model=meas_model)
             self.meas_data.append(noisy_meas)
             pos_list.append(noisy_pos)
@@ -159,7 +148,10 @@ class Simulator():
         Q_d_sim = sigma_acc**2 / self.dt
         
         for i in range(0, len(self.true_acceleration),sample_every):
-            noisy_acc = self.true_acceleration[i] + np.sqrt(Q_d_sim)*np.random.randn()
+            noisy_acc = self.true_acceleration[i]
+            if add_noise:
+                noisy_acc += np.sqrt(Q_d_sim)*np.random.randn()
+            
             acc_list.append(noisy_acc)
             u_k = VectorInput(value=np.array([noisy_acc]), stamp=round(self.time[i], ndigits=4), covariance=Q_d_sim)
             self.input_data.append(u_k)
@@ -172,6 +164,64 @@ class Simulator():
     
     def get_nav_info(self):
         return self.gt_data, self.input_data, self.meas_data
+    
+class DoubleIntegrator(ProcessModel):
+    """
+    The double-integrator process model is a second-order point kinematic model
+    given in continuous time by
+
+    .. math::
+        \dot{\mathbf{r}} = \mathbf{v}
+
+        \dot{\mathbf{v}} = \mathbf{u}
+
+    where :math:`\mathbf{u}` is the input.
+    """
+
+    def __init__(self, Q: np.ndarray):
+        """
+        Parameters
+        ----------
+        Q : np.ndarray
+            Q: Discrete time covariance on the input u.
+        """
+        if Q.shape[0] != Q.shape[1]:
+            raise ValueError("Q must be an n x n matrix.")
+
+        self._Q = Q
+        self.dim = Q.shape[0]
+
+    def evaluate(self, x: VectorState, u: VectorInput, dt: float) -> np.ndarray:
+        x_new = x.copy()
+        Ad = self.jacobian(None, None, dt)
+        Ld = self.input_jacobian(dt)
+        u = np.atleast_1d(u.value)
+        x_new.value = (
+            Ad @ x.value.reshape((-1, 1)) + Ld @ u[: self.dim].reshape((-1, 1))
+        ).ravel()
+        return x_new
+
+    def jacobian(self, x, u, dt) -> np.ndarray:
+        Ad = np.identity(2 * self.dim)
+        Ad[0 : self.dim, self.dim :] = dt * np.identity(self.dim)
+        return Ad
+
+    def covariance(self, x, u, dt) -> np.ndarray:
+        Ld = self.input_jacobian(dt)
+        sigma_acc = np.sqrt(self._Q * dt)
+        Q = np.array([[(1/3) * dt**3, 0.5 * dt**2],
+                    [0.5*dt**2, dt]]) * sigma_acc**2
+        # return Ld @ self._Q @ Ld.T
+        return Q
+    
+    def input_covariance(self, x, u, dt):
+        return self._Q
+
+    def input_jacobian(self, dt):
+        Ld = np.zeros((2 * self.dim, self.dim))
+        Ld[0 : self.dim, :] = 0.5 * dt**2 * np.identity(self.dim)
+        Ld[self.dim :, :] = dt * np.identity(self.dim)
+        return Ld
     
 if __name__=="__main__":
     from matplotlib import pyplot as plt
