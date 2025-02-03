@@ -19,7 +19,7 @@ if __name__== '__main__':
     BACKTRACK = True
     SIM_TIME = 0.5
     CUB_METHOD = 'GH' # 'spherical' # 
-    GH_DEG = 3
+    GH_DEG = 4
     # MAX_LEN = 40
     np.random.seed(1)
 
@@ -41,7 +41,8 @@ if __name__== '__main__':
     else:
         if STEREO:
             R_k = np.array([0.01])
-            meas_model = StereoCamera(R_d=R_k)
+            landmark_pos = np.array([10])
+            meas_model = StereoCamera(R_d=R_k, landmark_pos=landmark_pos)
         else:
             meas_model = NonLinearLaserRangeFinder(R_d=R_k, height=5, distance=8)
         
@@ -55,7 +56,7 @@ if __name__== '__main__':
     # Generating ground truth
     true_pos, true_vel, true_acc = Simulation.generate_ground_truth()
 
-    _,_,_ = Simulation.generate_measurements(sigma_acc=sigma_acc_continuous, pos_freq=laser_range_freq, acc_freq=imu_freq, meas_model=meas_model, add_noise=NOISE_ON)
+    meas_pos,_,meas_t = Simulation.generate_measurements(sigma_acc=sigma_acc_continuous, pos_freq=laser_range_freq, acc_freq=imu_freq, meas_model=meas_model, add_noise=NOISE_ON)
     # %%
     ####################
     #### GVI SETUP #####

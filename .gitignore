@@ -43,3 +43,6 @@ __pycache__/
 *.pyc
 ####
 
+# Bash Scripts
+clean_figs.bash
+

@@ -33,12 +33,13 @@ class NonLinearLaserRangeFinder(MeasurementModel):
         return self.R
     
 class StereoCamera(MeasurementModel):
-    def __init__(self,R_d:np.ndarray,  f=400, b = 0.1):
+    def __init__(self,R_d:np.ndarray, landmark_pos:np.ndarray, f=400, b = 0.1):
         self.R = np.atleast_2d(R_d)
+        self.landmark_pos = np.atleast_1d(landmark_pos)
         self.focal_len = f
         self.disparity = b
     def evaluate(self, x:nav.State) -> np.ndarray:
-        y = np.atleast_2d(self.focal_len * self.disparity / x.value[0])
+        y = np.atleast_2d(self.focal_len * self.disparity / (self.landmark_pos - x.value[0]))
         return y
     def covariance(self, x:nav.State) -> np.ndarray: 
         return self.R
@@ -129,35 +130,35 @@ class Simulator():
         """
         self.meas_data = []
         self.input_data = []
-        acc_list = []
-        pos_list = []
+        input_list = []
+        noisy_extero_vals = []
         time_list = []
         sample_every = int((1/self.dt) / pos_freq)
         for i in range(0,len(self.true_position),sample_every):
             meas = meas_model.evaluate(self.gt_data[i])
-            pos = meas.ravel()
-            noisy_pos = pos
+            meas_val = meas.ravel()
+            noisy_meas_val = meas_val
             if add_noise:
-                noisy_pos += np.sqrt(meas_model.covariance(self.gt_data[i])).ravel()*np.random.randn()
-            noisy_meas = Measurement(value=np.array([noisy_pos]), stamp=round(self.time[i], ndigits=4), model=meas_model)
+                noisy_meas_val += np.sqrt(meas_model.covariance(self.gt_data[i])).ravel()*np.random.randn()
+            noisy_meas = Measurement(value=np.array([noisy_meas_val]), stamp=round(self.time[i], ndigits=4), model=meas_model)
             self.meas_data.append(noisy_meas)
-            pos_list.append(noisy_pos)
+            noisy_extero_vals.append(noisy_meas_val)
             time_list.append(self.time[i])
 
         sample_every = int((1/self.dt) / acc_freq)
         Q_d_sim = sigma_acc**2 / self.dt
         
         for i in range(0, len(self.true_acceleration),sample_every):
-            noisy_acc = self.true_acceleration[i]
+            noisy_input = self.true_acceleration[i]
             if add_noise:
-                noisy_acc += np.sqrt(Q_d_sim)*np.random.randn()
+                noisy_input += np.sqrt(Q_d_sim)*np.random.randn()
             
-            acc_list.append(noisy_acc)
-            u_k = VectorInput(value=np.array([noisy_acc]), stamp=round(self.time[i], ndigits=4), covariance=Q_d_sim)
+            input_list.append(noisy_input)
+            u_k = VectorInput(value=np.array([noisy_input]), stamp=round(self.time[i], ndigits=4), covariance=Q_d_sim)
             self.input_data.append(u_k)
 
-        self.measured_position = np.array(pos_list)
-        self.measured_acceleration = np.array(acc_list)
+        self.measured_position = np.array(noisy_extero_vals)
+        self.measured_acceleration = np.array(input_list)
         self.measured_time = np.array(time_list)
 
         return self.measured_position, self.measured_acceleration, self.measured_time
