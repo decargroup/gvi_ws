@@ -31,6 +31,17 @@ class NonLinearLaserRangeFinder(MeasurementModel):
     
     def covariance(self, x: nav.State) -> np.ndarray:
         return self.R
+    
+class StereoCamera(MeasurementModel):
+    def __init__(self,R_d:np.ndarray,  f=400, b = 0.1):
+        self.R = np.atleast_2d(R_d)
+        self.focal_len = f
+        self.disparity = b
+    def evaluate(self, x:nav.State) -> np.ndarray:
+        y = np.atleast_2d(self.focal_len * self.disparity / x.value[0])
+        return y
+    def covariance(self, x:nav.State) -> np.ndarray: 
+        return self.R
 
 class MassSpringDamperSystem:
 
@@ -127,7 +138,7 @@ class Simulator():
             pos = meas.ravel()
             noisy_pos = pos
             if add_noise:
-                noisy_pos += np.sqrt(meas_model.covariance(self.gt_data[i]))*np.random.randn()
+                noisy_pos += np.sqrt(meas_model.covariance(self.gt_data[i])).ravel()*np.random.randn()
             noisy_meas = Measurement(value=np.array([noisy_pos]), stamp=round(self.time[i], ndigits=4), model=meas_model)
             self.meas_data.append(noisy_meas)
             pos_list.append(noisy_pos)

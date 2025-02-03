@@ -63,4 +63,4 @@ def gh_cubature(order_p, state_dof):
 def spherical_cubature(state_dof:int, order_p=None):
     sigma_points = np.sqrt(state_dof) * np.block([[np.eye(state_dof), -np.eye(state_dof)]])
     w = 1 / (2 * state_dof) * np.ones((2 * state_dof))
-    return sigma_points.T, w
+    return sigma_points.T, w.T

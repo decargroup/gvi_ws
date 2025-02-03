@@ -5,7 +5,7 @@ from typing import Callable, Optional, List
 from util.cubatures import gh_cubature, spherical_cubature
 from navlie.lib.states import VectorState
 from navlie.types import ProcessModel, Measurement, Input, StateWithCovariance
-from util.psd import force_PSD
+from util.psd import force_PSD, force_sym
 from abc import abstractmethod
 
 class FactoredState:
@@ -26,13 +26,14 @@ class FactoredState:
         if cubature_type=='GH':
             self._gh_degree = gh_degree
             self.cubature:Callable = gh_cubature
+            self._unit_sigma_pts, self._weights = self.cubature(order_p=self._gh_degree, state_dof=self.dof)
         elif cubature_type=='spherical':
             self.cubature:Callable = spherical_cubature
+            self._unit_sigma_pts, self._weights = self.cubature(order_p=None, state_dof=self.dof)
         else:
             raise NotImplementedError("Implement other cubature methods")
         
         # Generate Unit Sigma Points
-        self._unit_sigma_pts, self._weights = self.cubature(order_p=self._gh_degree, state_dof=self.dof)
         self.generate_new_sigma_pts()
 
     def generate_new_sigma_pts(self):
@@ -68,7 +69,7 @@ class FactoredState:
         
         self.expect_scalar = expect_phi.copy()
         self.expect_column = expect_mu_phi.copy()
-        self.expect_matrix = force_PSD(expect_mu_mu_phi.copy())
+        self.expect_matrix = expect_mu_mu_phi.copy()
         return
 
     
@@ -76,8 +77,9 @@ class FactoredState:
         # Project mean, information, covariance
         self.mean = self.projection @ total_mean
         self.information = self.projection @ total_information @ self.projection.T
+        # self.information = force_PSD(self.information)
         self.covariance = self.projection @ total_covariance @ self.projection.T
-
+        # self.covariance = force_PSD(self.covariance)
         # Recompute sigma points around new mean / covariance
         self.generate_new_sigma_pts()
         # Recompute expectations using new sigma points
@@ -172,7 +174,8 @@ class MeasurementFactor(FactoredState):
 
     def eval_phi(self, sigma_point:np.ndarray):
         sp_state = VectorState(value=sigma_point, stamp=self.stamp)
-        phi = 0.5 * (self.y_k - self.meas_model.evaluate(sp_state).reshape((-1,1))).T @ self.R_k_inv @ (self.y_k - self.meas_model.evaluate(sp_state).reshape((-1,1)))
+        # phi = 0.5 * (self.y_k - self.meas_model.evaluate(sp_state).reshape((-1,1))).T @ self.R_k_inv @ (self.y_k - self.meas_model.evaluate(sp_state).reshape((-1,1)))
+        phi = 0.5 * (self.y_k.ravel() - self.meas_model.evaluate(sp_state).ravel())**2 / self.R_k
         return phi
     
     def get_mean(self):
@@ -198,7 +201,6 @@ def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_d
     # Define process prior
     proj_proc_empty = np.zeros((2*state_dof, len(input_data)*state_dof))
     proj_idx = 0
-    proj_proc = np.eye(len(input_data)*state_dof)
     x_k_1 = x0.state.copy()
     P_k_1 = x0.covariance
     for i in range(len(input_data)-1):
@@ -209,9 +211,13 @@ def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_d
         A_k = proc_model.jacobian(x_k_1, u=u_k_1, dt=dt_u)
         Q_k = proc_model.covariance(x=x_k_1, u=u_k_1, dt=dt_u)
         P_k = A_k @ P_k_1 @ A_k.T + Q_k
+        P_k = force_sym(P_k)
         p_mean = np.vstack((x_k_1.value.reshape((-1,1)), x_k.value.reshape((-1,1))))
-        # Q_k = np.zeros((2,2))
-        P_covar = np.block([[P_k_1, Q_k],[Q_k, P_k]])
+        P_covar = np.block([[P_k_1, np.zeros((2,2))],
+                            [np.zeros((2,2)), P_k]])
+        # P_covar = np.block([[P_k_1, P_k_1 @ A_k.T],
+        #                     [A_k @ P_k_1, P_k]])
+        P_covar = force_sym(P_covar)
         proj_k = proj_proc_empty.copy()
         proj_k[:, proj_idx:proj_idx+(2*state_dof)] = np.eye(2*state_dof)
         p_fac_k = ProcessFactor(mean=p_mean, covariance=P_covar, proj_matrix=proj_k, stamp=u_k.stamp, gh_degree=gh_deg, cubature_type=cubature_type)
@@ -231,10 +237,28 @@ def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_d
         if meas.stamp<=input_data[-1].stamp:
             x_k_idx = factored_stamp_list.index(meas.stamp)
             x_k:FactoredState = factored_state_list[x_k_idx]
+            
             proj_k = proj_meas_empty.copy()
-            proj_k[:, proj_idx:proj_idx+state_dof] = np.eye(state_dof)
+            if isinstance(x_k, PriorFactor):
+                proj_k = x_k.projection.copy()
+            else:
+                proj_k = x_k.projection[x_k.state_dof:, :].copy()
             meas_factor = MeasurementFactor(mean=x_k.get_mean(), covariance=x_k.get_covariance(), stamp=meas.stamp, proj_matrix=proj_k, gh_degree=gh_deg, cubature_type=cubature_type)
             meas_factor.link_measurement(meas=meas)
             factored_state_list.append(meas_factor)
+            
+        proj_idx += state_dof
 
     return factored_state_list
+
+def limit_data(input_data:List[Input], meas_data:List[Measurement], proc_model:ProcessModel, max_length=100):
+    meas_stamps = [y.stamp for y in meas_data]
+    if len(input_data) > max_length:
+        input_data_lim = input_data[:max_length]
+        last_u = input_data_lim[-1]
+        last_y_idx = nav.find_nearest_stamp_idx(meas_stamps, last_u.stamp)
+        meas_data_lim = meas_data[:last_y_idx]
+        return input_data_lim, meas_data_lim
+        
+    
+

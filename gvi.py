@@ -10,16 +10,17 @@ from navlie.datagen import DataGenerator
 from navlie.lib.states import VectorState, VectorInput
 from navlie.lib.models import RangePointToAnchor
 from navlie.types import ProcessModel, MeasurementModel, Measurement, Input, StateWithCovariance, State
-from util.psd import force_PSD
+from util.psd import force_PSD, force_sym, regularize
 import matplotlib.pyplot as plt
 from scipy.linalg import block_diag
 from abc import abstractmethod
 
 class GVI:
-    def __init__(self, factored_states:List[FactoredState], total_dim:int, debug=False):
+    def __init__(self, factored_states:List[FactoredState], total_dim:int, backtrack_on = True, debug=False):
         self.factored_states = factored_states
         self.total_dim = total_dim
         self.debug = debug
+        self.backtrack_on = backtrack_on
         self.factor_dof = 0
         # Initialize mean and information
         self.mean = np.zeros((total_dim, 1))
@@ -29,9 +30,9 @@ class GVI:
 
         # Build full mean and information
         k = 0
-        phi = np.zeros((1,1))
-        for x_k in factored_states:
-            phi += x_k.expect_scalar
+        
+        for x_k in self.factored_states:
+            
             if isinstance(x_k, PriorFactor):
                 self.factor_dof = x_k.dof
             
@@ -53,171 +54,172 @@ class GVI:
         self.information = force_PSD(self.information)
         L, D, _ = scipy.linalg.ldl(self.information, lower=True)
         self.covariance = self.compute_covariance(L, D)
-        self.cur_cost = phi.copy() + np.linalg.slogdet(self.information)[1]
+
+        # Update states accordingly
+        phi = np.zeros((1,1))
+        for x_k in self.factored_states:
+            x_k.update_factor(total_mean=self.mean, total_information=self.information, total_covariance=self.covariance)
+            phi += x_k.expect_scalar
+        self.cur_cost = phi.copy() + (0.5 * np.linalg.slogdet(self.information)[1])
 
                 
     def solve(self):
         n_iters = 0
         if self.debug:
-            print("Starting Conditions: ")
-            print("mu_{0}: \n", self.mean.T)
-            print("Info_{0}: \n", self.information)
+            print(f"Starting Cost: {self.cur_cost}")
         while(True):
+            n_iters += 1
             # TODO: Implement backtracking
             # Update info
             phi_dx = np.zeros_like(self.mean)
-            phi = np.zeros((1,1))
-            new_information = np.zeros_like(self.information)
-            # functional_dinfo = np.zeros_like(self.information)
+            self.new_information = np.zeros_like(self.information)
             expect_matrix = np.zeros_like(self.information)
+            prev_phi = np.zeros((1,1))
             for x_k in self.factored_states:
-                # factored_state_k.generate_new_sigma_pts()
+                # if isinstance(x_k, MeasurementFactor):
+                    # print('Measurement')
                 proj_k = x_k.projection
-                phi += x_k.expect_scalar
+                prev_phi += x_k.expect_scalar
                 phi_dx += proj_k.T @ x_k.phi_dx()
-                new_information += proj_k.T @ force_PSD(x_k.phi_dx_dx()) @ proj_k
-                # functional_dinfo += proj_k.T @ force_PSD(x_k.phi_dinfo()) @ proj_k
+                self.new_information += proj_k.T @ x_k.phi_dx_dx() @ proj_k
                 expect_matrix += proj_k.T @ x_k.expect_matrix @ proj_k
+                
+            # Force Sparsity and LDL decomposition
+            # self.new_information = self._force_sparsity(self.new_information, deg=self.factor_dof)
+            self.new_information = force_PSD(self.new_information)
+            self.new_information = regularize(self.new_information)
+            L, D, _ = scipy.linalg.ldl(self.new_information, lower=True)
             
-            # May remove force_sparsity
-            new_information = self._force_sparsity(new_information, deg=self.factor_dof)
-            L, D, _ = scipy.linalg.ldl(new_information, lower=True)
-            self.new_cost = phi + (0.5 * np.linalg.slogdet(D)[1])
-            new_covariance = self.compute_covariance(L, D)
+            # self.new_covariance = force_PSD(self.compute_covariance(L, D))
+            self.new_covariance = force_PSD(scipy.linalg.inv(self.new_information))
             # This has been a bit stabler
-            delta_mu = scipy.linalg.solve(new_information, -1*phi_dx)
+            # delta_mu, _, _, _ = np.linalg.lstsq(self.new_information, -phi_dx, rcond=None)
+            delta_mu = scipy.linalg.solve(self.new_information, -phi_dx)
 
-            # solve triangular unstable for some values
-            # v = scipy.linalg.solve_triangular(L, -phi_dx, lower=True) 
-            # delta_mu = scipy.linalg.solve_triangular(L.T, v, lower=False) 
+            # expect_matrix = force_PSD(expect_matrix)
+            # functional_dinfo = (-0.5*expect_matrix) + (0.5*self.covariance*prev_phi) + (0.5*self.covariance)
+            # functional_dinfo = force_sym(functional_dinfo)
+            # delta_info = -2 * self.information @ functional_dinfo @ self.information
             
-            functional_dinfo = (-0.5*expect_matrix) + (0.5*self.covariance*phi) + (0.5*self.covariance)
-            delta_info = force_PSD(-2 * self.information @ functional_dinfo @ self.information)
-            
-            # delta_info = self._force_sparsity(delta_info, deg=self.factor_dof)
-            # delta_info = force_PSD(new_information - self.information)
-        
+            delta_info = self.new_information - self.information
+            delta_info = force_sym(delta_info)
+                    
             # Calculate breaking condition
-            size_mu = np.abs(np.linalg.norm(delta_mu))
-            size_info = np.linalg.trace(delta_info)
+            size_mu = np.linalg.norm(delta_mu)
+            size_info = np.linalg.norm(delta_info)
+            # size_info = np.linalg.trace(self.covariance @ delta_info @ self.covariance @ delta_info)
+            
 
-            if size_mu < 1e-6 and size_info < 1e-6:
-                print("--------------------------------")
-                print(f"|  Converged in {n_iters} iterations!  |")
-                print("--------------------------------")
-
-                break
+            # size_info = np.linalg.norm(new_information @ self.covariance)
             if n_iters > 10:
                 print(f"Reached max iterations")
                 print("|Info|: ", size_info)
                 print("|mu|: ", size_mu)
                 break
-            
-            # if self.new_cost > self.cur_cost:
-            #     print("--------------------------------")
-            #     print(f"|  Cost not reduced from old {self.cur_cost} to {self.new_cost}  |")
-            #     print(f"|  After {n_iters} iterations!  |")
-            #     print("--------------------------------")
-            #     break
 
-            # Backtracking loop
-            alpha = 0.95
-            backtrack_count = 0
-            proposed_info = new_information.copy()
-            proposed_covar = new_covariance.copy()
-            proposed_mean = (self.mean + delta_mu).copy()
-            while(self.new_cost >= self.cur_cost):
-                backtrack_count += 1
-                temp_phi = 0
-                proposed_info = force_PSD(self.information + (alpha*delta_info))
-                size_info = np.linalg.trace(alpha*delta_info)
-                proposed_info = self._force_sparsity(proposed_info, self.factor_dof)
-                
-                L, D, _ = scipy.linalg.ldl(proposed_info, lower=True)
-                proposed_covar = self.compute_covariance(L,D)
-                proposed_mean = self.mean + (alpha*delta_mu)
-                
-                for x_k in self.factored_states:
-                    x_k.update_factor(total_mean=proposed_mean, total_information=proposed_info, total_covariance=proposed_covar)
-                    temp_phi += x_k.expect_scalar
-
-                self.new_cost = temp_phi + (0.5 * np.linalg.slogdet(D)[1])
-                
-                if self.debug:
-                    print("--------------------------------")
-                    print(f"| Backtrack #{backtrack_count}, alpha: {alpha}   |")
-                    print(f"| New Cost:{self.new_cost}, Old Cost: {self.cur_cost} |")
-                    print("--------------------------------")
-                
-                if alpha <= 0.1:
-                    print("--------------------------------")
-                    print("| Backtracking failed to find suitable step size | ")
-                    print(f"|  Converged in {n_iters} iterations!  |")
-                    print("--------------------------------")
-                    for x_k in self.factored_states:
-                        x_k.update_factor(total_mean=self.mean, total_information=self.information.copy(), total_covariance=self.covariance.copy())
-                    return
-                alpha *= 0.95
-                    
-            # L, D, _ = scipy.linalg.ldl(new_information)
-            self.information = proposed_info
-            self.covariance = proposed_covar
-            self.mean = proposed_mean
-
+            self.new_phi = np.zeros((1,1))
+            self.new_mean = self.mean + delta_mu
             for x_k in self.factored_states:
-                x_k.update_factor(total_mean=self.mean.copy(), total_information=self.information.copy(), total_covariance=self.covariance.copy())
+                # Update factor recomputes expectations as well
+                x_k.update_factor(total_mean=self.new_mean.copy(), total_information=self.new_information.copy(), total_covariance=self.new_covariance.copy())
+                # Update new phi, for new cost
+                self.new_phi += x_k.expect_scalar
 
-            n_iters += 1
+            self.new_cost = self.new_phi + (0.5 * np.linalg.slogdet(self.new_information)[1])
+            delta_cost = (self.cur_cost - self.new_cost)
+            if size_mu < 1e-8 and size_info<1e-6:
+                print("--------------------------------")
+                print(f"Iter: {n_iters} || Cost: {self.cur_cost} || Step size (mu): {size_mu} || Step size (info): {size_info}")
+                print(f"|  Converged in {n_iters} iterations!  |")
+                print("--------------------------------")
+                for x_k in self.factored_states:
+                    x_k.update_factor(total_mean=self.mean, total_information=self.information, total_covariance=self.covariance)
+                break
+
+            if np.abs(delta_cost / self.cur_cost) < 1e-6:
+                print("--------------------------------")
+                print(f"Iter: {n_iters} || Cost: {self.cur_cost} || Step size (mu): {size_mu} || Step size (info): {size_info}")
+                print(f"|  Converged in {n_iters} iterations!  |")
+                print("--------------------------------")
+                for x_k in self.factored_states:
+                    x_k.update_factor(total_mean=self.mean, total_information=self.information, total_covariance=self.covariance)
+                break
+            
+            if self.new_cost >= self.cur_cost:
+                if self.backtrack_on:
+                    print(f"Starting backtracking as {self.new_cost} > {self.cur_cost}")
+                    backtrack_success = self.backtrack(delta_mu, delta_info, alpha=1.0, max_iters=25)
+                    if not backtrack_success:
+                        print(f"Backtracking failed to return a suitable step size")
+                        print("Exiting...")
+                        print(f"Iter: {n_iters} || Cost: {self.cur_cost} || Step size (mu): {size_mu} || Step size (info): {size_info}")
+                        return 
+                else:
+                    print(f"Exiting, didn't reduce cost from {self.new_cost} to {self.cur_cost}")
+                    for x_k in self.factored_states:
+                        x_k.update_factor(total_mean=self.mean, total_information=self.information, total_covariance=self.covariance)
+                    self.new_covariance = self.covariance.copy()
+                    self.new_information = self.information.copy()
+                    self.new_mean = self.mean.copy()
+                    self.new_cost = self.cur_cost
+                    return
+
+                
+            
+            # Update for next iteration
+            self.information = self.new_information.copy()
+            self.covariance = self.new_covariance.copy()
+            self.mean = self.new_mean.copy()
             self.cur_cost = self.new_cost
 
             if self.debug:
-                # print( "########################################")
-                # print("Iteration: ", n_iters)
-                # print( "----------------------------------------")
-                # print(f"Cost: ", self.cur_cost)
-                # print(f"|delta_mu_{n_iters}|:  {size_mu}")
-                # print(f"|delta_info_{n_iters}|: {size_info}")
-                # # print(f"Info_{n_iters}: \n", self.information)
-                # print( "########################################\n")
                 print(f"Iter: {n_iters} || Cost: {self.cur_cost} || Step size (mu): {size_mu} || Step size (info): {size_info}")
             
-    def backtrack(self, delta_mu:np.ndarray, new_info:np.ndarray, delta_info:np.ndarray, alpha=0.95, max_iters=10):
-        prev_info = new_info.copy()
-        prev_mean = self.mean.copy() + delta_mu
-        prev_cost = self.cur_cost
+    def backtrack(self, delta_mu:np.ndarray, delta_info:np.ndarray, alpha=0.95, max_iters=10):
         backtrack_iters = 0
         while(True):
-            
-            proposed_info = force_PSD(self.information + (alpha*delta_info))
-            proposed_info = self._force_sparsity(proposed_info, self.factor_dof)
+            proposed_info = self.information + (alpha*delta_info)
+            # proposed_info = self._force_sparsity(proposed_info, self.factor_dof)
+            proposed_info = force_PSD(proposed_info)
+            proposed_info = regularize(proposed_info)
             L, D, _ = scipy.linalg.ldl(proposed_info, lower=True)
-            proposed_covar = self.compute_covariance(L,D)
+            # proposed_covar = force_PSD(self.compute_covariance(L,D))
+            proposed_covar = force_PSD(scipy.linalg.inv(proposed_info))
             proposed_mean = self.mean + (alpha*delta_mu)
-
             temp_phi = 0
             for x_k in self.factored_states:
                 x_k.update_factor(total_mean=proposed_mean, total_information=proposed_info, total_covariance=proposed_covar)
                 temp_phi += x_k.expect_scalar
 
-            self.new_cost = temp_phi + (0.5 * np.linalg.slogdet(D)[1])
+            self.new_cost = temp_phi + (0.5 * np.linalg.slogdet(proposed_info)[1])
+            if backtrack_iters % 5 == 0:
+                print(f"Backtrack #{backtrack_iters} || Alpha: {alpha} || Cost: {self.new_cost}")
             
-            if self.new_cost > prev_cost:
-                break
+            if (self.new_cost < self.cur_cost):
+                # Backtracking Succeeded
+                self.information = proposed_info.copy()
+                self.covariance = proposed_covar.copy()
+                self.mean = proposed_mean
+                return True
             
-            prev_cost = self.new_cost
-            prev_mean = proposed_mean.copy()
-            prev_info = proposed_info.copy()
-            alpha *= 0.95
+            alpha = 0.95**backtrack_iters
             backtrack_iters += 1
             
-            if backtrack_iters == max_iters:
-                break
-        
-        return prev_mean, prev_info
+            if backtrack_iters >= max_iters:
+                # Backtrack Failed, Convergence?
+                # Reupdate states with original values
+                for x_k in self.factored_states:
+                    x_k.update_factor(total_mean=self.mean, total_information=self.information, total_covariance=self.covariance)
+                self.new_covariance = self.covariance.copy()
+                self.new_information = self.information.copy()
+                self.new_mean = self.mean.copy()
+                self.new_cost = self.cur_cost
+                return False
 
     
     def get_estimate_list(self):
         est_list = []
+        stamp_list = []
         for x_k in self.factored_states:
             x_k:FactoredState
             mean = x_k.get_mean()
@@ -225,9 +227,20 @@ class GVI:
             stamp = x_k.stamp
             state_k = VectorState(value=mean, stamp=stamp)
             est_k = StateWithCovariance(state=state_k, covariance=covar)
-            est_list.append(est_k)
+            if stamp not in stamp_list:
+                est_list.append(est_k)
+                stamp_list.append(stamp)
+            else:
+                idx = nav.find_nearest_stamp_idx(stamp_list, stamp)
+                if (not np.allclose(mean.reshape((-1,1)), est_list[idx].state.value.reshape((-1,1)))) or (not np.allclose(covar, est_list[idx].covariance)):
+                    print(x_k, "at time: ", stamp)
+                    print(x_k.projection)
+                    print(mean.ravel(), est_list[idx].state.value.ravel())
+                    print(covar, "\n", est_list[idx].covariance)
+                    raise ValueError("Mean and covariance don't match")
         
         return est_list
+
     
     def compute_covariance(self, L, D):
         S = np.zeros_like(D)

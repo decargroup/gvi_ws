@@ -1,8 +1,9 @@
+# %%
 import numpy as np
 import navlie as nav
 from gvi import GVI
-from models import Simulator, NonLinearLaserRangeFinder, LaserRangeFinder, DoubleIntegrator
-from factors import construct_factor_list
+from models import Simulator, NonLinearLaserRangeFinder, LaserRangeFinder, DoubleIntegrator, StereoCamera
+from factors import construct_factor_list, limit_data
 from navlie.lib.states import VectorState
 from navlie.types import  StateWithCovariance
 from util.psd import force_PSD
@@ -14,9 +15,12 @@ from abc import abstractmethod
 if __name__== '__main__':
     NOISE_ON = True
     LINEAR = False
+    STEREO = True
+    BACKTRACK = True
     SIM_TIME = 0.5
-    CUB_METHOD = 'GH'
+    CUB_METHOD = 'GH' # 'spherical' # 
     GH_DEG = 3
+    # MAX_LEN = 40
     np.random.seed(1)
 
     # Plotting parameters
@@ -33,9 +37,14 @@ if __name__== '__main__':
     dt = 1 / imu_freq
     R_k = np.array([0.1])
     if LINEAR:
-        laser_range = LaserRangeFinder(R_d=R_k)
+        meas_model = LaserRangeFinder(R_d=R_k)
     else:
-        laser_range = NonLinearLaserRangeFinder(R_d=R_k, height=2, distance=8)
+        if STEREO:
+            R_k = np.array([0.01])
+            meas_model = StereoCamera(R_d=R_k)
+        else:
+            meas_model = NonLinearLaserRangeFinder(R_d=R_k, height=5, distance=8)
+        
 
     x0_val = [5, 0]
     Simulation = Simulator(t_end=SIM_TIME, freq=imu_freq, x0=x0_val)
@@ -46,30 +55,42 @@ if __name__== '__main__':
     # Generating ground truth
     true_pos, true_vel, true_acc = Simulation.generate_ground_truth()
 
-    _,_,_ = Simulation.generate_measurements(sigma_acc=sigma_acc_continuous, pos_freq=laser_range_freq, acc_freq=imu_freq, meas_model=laser_range, add_noise=NOISE_ON)
+    _,_,_ = Simulation.generate_measurements(sigma_acc=sigma_acc_continuous, pos_freq=laser_range_freq, acc_freq=imu_freq, meas_model=meas_model, add_noise=NOISE_ON)
+    # %%
     ####################
     #### GVI SETUP #####
     ####################
     # Get Navlie formatted data
     gt_data, input_data, meas_data = Simulation.get_nav_info()
+    input_data_lim = input_data[:]
+    meas_data_lim = meas_data[:]
+    gt_data_lim = gt_data[:]
+    # input_data_lim = input_data[0:3]
+    # meas_data_lim = meas_data[0:1]
+    
     state_dof = len(x0_val)
     x0_state = VectorState(value=np.array(x0_val), stamp=gt_data[0].stamp)
     # sigma_acc_continuous = 100
     dt = 1 / imu_freq
     Q_d = np.array([[sigma_acc_continuous**2 / dt]])
     proc_model = DoubleIntegrator(Q_d)
-    P0 = np.eye(2) * 1e-2
+    P0 = np.eye(2) * 1e-1
     if NOISE_ON:
         x0_state = x0_state.plus(nav.randvec(P0))
     x0 = StateWithCovariance(state=x0_state.copy(), covariance=P0)
 
-    factored_state_list = construct_factor_list(x0, input_data, meas_data, proc_model, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
-
+    
+    # input_data_lim, meas_data_lim = limit_data(input_data, meas_data, proc_model, max_length=MAX_LEN)
+    # gt_data = gt_data[0:MAX_LEN]
+    
+    factored_state_list = construct_factor_list(x0, input_data_lim, meas_data_lim, proc_model, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
+    # %%
     ####################
     ##### RUN GVI ######
     ####################
 
-    gvi = GVI(factored_states=factored_state_list, total_dim=state_dof*len(gt_data), debug=True)
+    gvi = GVI(factored_states = factored_state_list, total_dim = state_dof*len(input_data_lim), backtrack_on = BACKTRACK, debug = True)
+    # %%
     gvi.solve()
 
     #####################
@@ -77,14 +98,14 @@ if __name__== '__main__':
     #####################
     estimate_list_gvi = gvi.get_estimate_list()
     estimate_stamps = [float(x.stamp) for x in estimate_list_gvi]
-    gt_stamps = [x.stamp for x in gt_data]
+    gt_stamps = [x.stamp for x in gt_data_lim]
 
     matches = nav.associate_stamps(estimate_stamps, gt_stamps)
 
     est_list_gvi = []
     gt_list = []
     for match in matches:
-        gt_list.append(gt_data[match[1]])
+        gt_list.append(gt_data_lim[match[1]])
         est_list_gvi.append(estimate_list_gvi[match[0]])
 
     results_gvi = nav.GaussianResultList.from_estimates(est_list_gvi, gt_list)
@@ -96,8 +117,9 @@ if __name__== '__main__':
     ax_gvi[1].set_ylabel(r'$\dot{r}$ (m/s)')
     ax_gvi[1].set_xlabel("Time (s)")
     plt.tight_layout()
-    plt.savefig('/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_three_sig.pdf')
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_three_sig_{SIM_TIME}.pdf')
 
+    
     # fig, ax = plt.subplots(2, 1)
     # fig.tight_layout()
     # ax[0].plot(results_gvi.stamp, results_gvi.value[:, 0], label="ESGVI")
@@ -117,17 +139,18 @@ if __name__== '__main__':
     #######################
 
     estimator = nav.BatchEstimator(solver_type="GN", verbose=True)
-    estimate_list_map, opt_results = estimator.solve(x0=x0.state, P0 = x0.covariance, input_data=input_data, process_model=proc_model, meas_data=meas_data, return_opt_results=True)
+    estimate_list_map, opt_results = estimator.solve(x0=x0.state, P0 = x0.covariance, input_data=input_data_lim, process_model=proc_model, meas_data=meas_data_lim, return_opt_results=True)
+    
 
     estimate_stamps_map = [float(x.state.stamp) for x in estimate_list_map]
-    gt_stamps = [x.stamp for x in gt_data]
+    gt_stamps = [x.stamp for x in gt_data_lim]
 
     matches = nav.associate_stamps(estimate_stamps_map, gt_stamps)
 
     est_list_map = []
     gt_list = []
     for match in matches:
-        gt_list.append(gt_data[match[1]])
+        gt_list.append(gt_data_lim[match[1]])
         est_list_map.append(estimate_list_map[match[0]])
 
     # Postprocess the results and plot
@@ -146,7 +169,16 @@ if __name__== '__main__':
     ax[0].legend(loc='upper right')
     ax[1].legend()
     plt.tight_layout()
-    plt.savefig('/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_map_three_sig.pdf')
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_map_three_sig_{SIM_TIME}.pdf')
+
+    # Plot NEES
+    fig, axs = nav.plot_nees(results_map, label='MAP')
+    fig, axs = nav.plot_nees(results_gvi, ax=axs, label='ESGVI')
+    axs.set_xlabel("Time (s)")
+    axs.set_title("NEES")
+
+    plt.tight_layout()
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/nees_{SIM_TIME}.pdf')
 
     ##########################
     ##### PRINT RESULTS ######
@@ -156,3 +188,5 @@ if __name__== '__main__':
     print("-----------------------------------------------  ")
     print(f" ESGVI  | {np.mean(results_gvi.error[:,0])}  | {np.mean(results_gvi.error[:,1])}")
     print(f" MAP    | {np.mean(results_map.error[:,0])} | {np.mean(results_map.error[:,1])}")
+
+# %%

@@ -46,7 +46,7 @@ def nearestPD(A):
     return A3
 
 
-def isPD(B):
+def isPD(B:np.ndarray) -> bool:
     """Returns true when input is positive-definite, via Cholesky"""
     try:
         _ = la.cholesky(B)
@@ -54,28 +54,45 @@ def isPD(B):
     except la.LinAlgError:
         return False
     
-def regularize(A, cond_threshold=1e12, epsilon=1e-6):
-    """
-    Regularizes a matrix if its condition number is too high.
-
-    Parameters:
-        A (np.ndarray): The input matrix.
-        cond_threshold (float): Threshold for condition number beyond which regularization is applied.
-        epsilon (float): Small value to add to the diagonal for regularization.
-
-    Returns:
-        np.ndarray: The regularized matrix.
-    """
-    cond_number = la.cond(A)
+def regularize(A: np.ndarray, cond_threshold=1e12, eps_min=1e-6, eps_max=1e-1) -> np.ndarray:
+    """ Regularize matrix by adaptively adjusting the diagonal perturbation. """
+    cond_number = np.linalg.cond(A)
     if cond_number > cond_threshold or not np.isfinite(cond_number):
-        # print(f"Condition number is too high ({cond_number:.2e}). Regularizing the matrix.")
-        A += epsilon * np.eye(A.shape[0])  # Add small diagonal regularization
+        eps = eps_min
+        while cond_number > cond_threshold and eps < eps_max:
+            A += eps * np.eye(A.shape[0])
+            cond_number = np.linalg.cond(A)
+            eps *= 2  # Gradually increase epsilon
+        print(f"Regularized condition number {cond_number}, with epsilon = {eps}")
     return A
     
-def force_PSD(A, cond_threshold=1e12, epsilon=1e-6):
+def force_PSD(A:np.ndarray) -> np.ndarray:
     
-    A = regularize(A, cond_threshold=cond_threshold, epsilon=epsilon)
+    # A = regularize(A, cond_threshold=cond_threshold, epsilon=epsilon)
     if not isPD(A):
         return nearestPD(A)
     else:
         return A
+    
+def force_sym(A):
+    A = (A + A.T) / 2
+    return A
+
+# def nearest_PSD(A:np.ndarray, epsilon:float = 1e-8) -> np.ndarray:
+#     A = force_sym(A)
+
+#     # Perform eigendecomposition: Σ = V D V^T
+#     eigvals, eigvecs = np.linalg.eigh(A)  # Eigen decomposition for symmetric matrices
+    
+#     # Modify D to D+ (element-wise max with 0)
+#     D_plus = np.diag(np.maximum(eigvals, 0))
+    
+#     # Reconstruct Σ+ = V D+ V^T + epsilon * I
+#     while True:
+#         A = eigvecs @ D_plus @ eigvecs.T + epsilon * np.eye(A.shape[0])
+#         if isPD(A):
+#             break
+#         else:
+#             epsilon *= 10
+    
+#     return A
