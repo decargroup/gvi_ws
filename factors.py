@@ -10,11 +10,11 @@ from abc import abstractmethod
 
 class FactoredState:
     def __init__(self, mean:np.ndarray, covariance:np.ndarray, proj_matrix:np.ndarray, stamp:float, cubature_type= 'GH', gh_degree = 3):
-        self.mean:np.ndarray = mean.reshape((-1,1))
-        self.covariance:np.ndarray = covariance.copy()
+        self.mean:np.ndarray = np.copy(mean.reshape((-1,1)))
+        self.covariance:np.ndarray = np.copy(covariance)
         self.sqrt_covariance:np.ndarray = np.linalg.cholesky(covariance)
         self.information:np.ndarray = force_PSD(scipy.linalg.inv(covariance))
-        self.projection = proj_matrix.copy()
+        self.projection = np.copy(proj_matrix)
         self.stamp = stamp
         self.dof = np.shape(self.mean)[0]
         self.state_dof = self.dof
@@ -37,9 +37,10 @@ class FactoredState:
         self.generate_new_sigma_pts()
 
     def generate_new_sigma_pts(self):
-        self._sqrt_cov = np.linalg.cholesky(self.covariance)
-        self._sigma_pts = [self.mean + self._sqrt_cov @ sp_i.reshape((-1,1)) 
-                for sp_i in self._unit_sigma_pts]
+        self.sqrt_covariance = np.linalg.cholesky(self.covariance)
+        self._sigma_pts = [self.mean + 
+                           self.sqrt_covariance @ sp_i.reshape((-1,1)) 
+                           for sp_i in self._unit_sigma_pts]
         return
     
     def phi_dx(self):
@@ -106,6 +107,7 @@ class ProcessFactor(FactoredState):
         super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree)
         # Individual state dof
         self.state_dof = int(self.dof / 2)
+        self.y_k:np.ndarray = None
 
     def link_dependent_state(self, process_model:ProcessModel, u_k_1:Input):
         self.process_model = process_model
@@ -115,15 +117,20 @@ class ProcessFactor(FactoredState):
         self.dt = self.stamp - self.u.stamp
         # TODO: Fix the None arguments
         self.Q = process_model.covariance(None, None, self.dt)
-        self.Q_inv = scipy.linalg.inv(self.Q)
+        self.Q_inv = force_PSD(scipy.linalg.inv(self.Q))
         self.compute_expectations()
 
     def eval_phi(self, sigma_point:np.ndarray):
+        # Get sigma points for each associated state
         sp_x_k_1 = sigma_point.reshape((-1,1))[0:self.state_dof]
         sp_x_k = sigma_point.reshape((-1,1))[self.state_dof:]
+        # Evaluate process model with sigma x_k_minus_1
         x_k_1 = VectorState(value=sp_x_k_1, stamp=self.u.stamp)
         proc_model_val = self.process_model.evaluate(x_k_1, self.u, self.dt).value.reshape((-1,1))
-        phi = 0.5 * (sp_x_k - proc_model_val).T @ self.Q_inv @ (sp_x_k - proc_model_val)
+        # Process factor
+        proc_diff = sp_x_k - proc_model_val
+        phi = 0.5 * proc_diff.T @ self.Q_inv @ proc_diff
+        
         return phi
     
     def get_mean(self):
@@ -144,11 +151,14 @@ class PriorFactor(FactoredState):
     def link_prior(self, x0:StateWithCovariance):
         self.x0_check = x0.state.value.copy().reshape((-1,1))
         self.P0_check = x0.covariance.copy()
-        self.P0_check_inv = scipy.linalg.inv(self.P0_check)
+        # TODO: Maybe change this to current information
+        self.P0_check_inv = force_PSD(scipy.linalg.inv(self.P0_check))
         self.compute_expectations()
 
     def eval_phi(self, sigma_point:np.ndarray):
-        phi = 0.5 * (sigma_point.reshape((-1,1)) - self.x0_check).T @ self.P0_check_inv @ (sigma_point.reshape((-1,1)) - self.x0_check)
+        prior_diff = sigma_point.reshape((-1,1)) - self.x0_check
+        phi = 0.5 * prior_diff.T @ self.P0_check_inv @ prior_diff
+
         return phi
     
     def get_mean(self):
@@ -169,13 +179,16 @@ class MeasurementFactor(FactoredState):
         self.meas_model = meas.model
         # TODO: Fix None argument
         self.R_k = np.atleast_2d(meas.model.covariance(x=None))
-        self.R_k_inv = scipy.linalg.inv(self.R_k)
+        self.R_k_inv = force_PSD(scipy.linalg.inv(self.R_k))
         self.compute_expectations()
 
     def eval_phi(self, sigma_point:np.ndarray):
+        # Generate state from sigma point
         sp_state = VectorState(value=sigma_point, stamp=self.stamp)
-        # phi = 0.5 * (self.y_k - self.meas_model.evaluate(sp_state).reshape((-1,1))).T @ self.R_k_inv @ (self.y_k - self.meas_model.evaluate(sp_state).reshape((-1,1)))
-        phi = 0.5 * (self.y_k.ravel() - self.meas_model.evaluate(sp_state).ravel())**2 / self.R_k
+        # Plug into measurement model
+        meas_diff = self.y_k - self.meas_model.evaluate(sp_state).reshape((-1,1))
+        # Evaluate prior factor
+        phi = 0.5 * meas_diff.T @ self.R_k_inv @ meas_diff
         return phi
     
     def get_mean(self):
@@ -202,7 +215,7 @@ def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_d
     proj_proc_empty = np.zeros((2*state_dof, len(input_data)*state_dof))
     proj_idx = 0
     x_k_1 = x0.state.copy()
-    P_k_1 = x0.covariance
+    P_k_1 = force_sym(x0.covariance)
     for i in range(len(input_data)-1):
         u_k_1:Input = input_data[i]
         u_k:Input = input_data[i+1]
@@ -213,10 +226,14 @@ def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_d
         P_k = A_k @ P_k_1 @ A_k.T + Q_k
         P_k = force_sym(P_k)
         p_mean = np.vstack((x_k_1.value.reshape((-1,1)), x_k.value.reshape((-1,1))))
-        P_covar = np.block([[P_k_1, np.zeros((2,2))],
-                            [np.zeros((2,2)), P_k]])
-        # P_covar = np.block([[P_k_1, P_k_1 @ A_k.T],
-        #                     [A_k @ P_k_1, P_k]])
+        if i==0:
+            P_covar = np.block([[P_k_1, np.zeros((2,2))],
+                                [np.zeros((2,2)), P_k]])
+        else:
+            P_covar = np.block([[P_k_1, np.zeros((2,2))],
+                                [np.zeros((2,2)), P_k]])
+            # P_covar = np.block([[P_k_1, P_k_1 @ A_k.T],
+            #                     [A_k @ P_k_1, P_k]])
         P_covar = force_sym(P_covar)
         proj_k = proj_proc_empty.copy()
         proj_k[:, proj_idx:proj_idx+(2*state_dof)] = np.eye(2*state_dof)
@@ -230,7 +247,6 @@ def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_d
 
     # Define measurement factors
     proj_meas_empty = np.zeros((state_dof, len(input_data)*state_dof))
-    proj_idx = 0
     for i in range(len(meas_data)):
         meas:Measurement = meas_data[i]
         # TODO: Fix assumption that measurement is synchronized with inputs
@@ -241,14 +257,15 @@ def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_d
             proj_k = proj_meas_empty.copy()
             if isinstance(x_k, PriorFactor):
                 proj_k = x_k.projection.copy()
+                # x_k.link_measurement(meas=meas)
             else:
+                x_k:ProcessFactor
                 proj_k = x_k.projection[x_k.state_dof:, :].copy()
+                # x_k.link_measurement(meas=meas)
             meas_factor = MeasurementFactor(mean=x_k.get_mean(), covariance=x_k.get_covariance(), stamp=meas.stamp, proj_matrix=proj_k, gh_degree=gh_deg, cubature_type=cubature_type)
             meas_factor.link_measurement(meas=meas)
             factored_state_list.append(meas_factor)
-            
-        proj_idx += state_dof
-
+    
     return factored_state_list
 
 def limit_data(input_data:List[Input], meas_data:List[Measurement], proc_model:ProcessModel, max_length=100):

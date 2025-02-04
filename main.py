@@ -16,10 +16,10 @@ if __name__== '__main__':
     NOISE_ON = True
     LINEAR = False
     STEREO = True
-    BACKTRACK = True
-    SIM_TIME = 0.5
+    BACKTRACK = False
+    SIM_TIME = 3
     CUB_METHOD = 'GH' # 'spherical' # 
-    GH_DEG = 4
+    GH_DEG = 3
     # MAX_LEN = 40
     np.random.seed(1)
 
@@ -33,9 +33,9 @@ if __name__== '__main__':
     ######## SIM SETUP ###########
     laser_range_freq = 10
     imu_freq = 100
-    sigma_acc_continuous = 0.045
+    sigma_acc_continuous = 0.02
     dt = 1 / imu_freq
-    R_k = np.array([0.1])
+    R_k = np.array([0.05])
     if LINEAR:
         meas_model = LaserRangeFinder(R_d=R_k)
     else:
@@ -66,7 +66,7 @@ if __name__== '__main__':
     input_data_lim = input_data[:]
     meas_data_lim = meas_data[:]
     gt_data_lim = gt_data[:]
-    # input_data_lim = input_data[0:3]
+    # input_data_lim = input_data[0:2]
     # meas_data_lim = meas_data[0:1]
     
     state_dof = len(x0_val)
@@ -75,7 +75,7 @@ if __name__== '__main__':
     dt = 1 / imu_freq
     Q_d = np.array([[sigma_acc_continuous**2 / dt]])
     proc_model = DoubleIntegrator(Q_d)
-    P0 = np.eye(2) * 1e-1
+    P0 = np.eye(2) * 1e-2
     if NOISE_ON:
         x0_state = x0_state.plus(nav.randvec(P0))
     x0 = StateWithCovariance(state=x0_state.copy(), covariance=P0)
@@ -118,7 +118,7 @@ if __name__== '__main__':
     ax_gvi[1].set_ylabel(r'$\dot{r}$ (m/s)')
     ax_gvi[1].set_xlabel("Time (s)")
     plt.tight_layout()
-    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_three_sig_{SIM_TIME}.pdf')
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_three_sigma.pdf')
 
     
     # fig, ax = plt.subplots(2, 1)
@@ -170,7 +170,7 @@ if __name__== '__main__':
     ax[0].legend(loc='upper right')
     ax[1].legend()
     plt.tight_layout()
-    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_map_three_sig_{SIM_TIME}.pdf')
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_map_three_sigma.pdf')
 
     # Plot NEES
     fig, axs = nav.plot_nees(results_map, label='MAP')
@@ -179,7 +179,7 @@ if __name__== '__main__':
     axs.set_title("NEES")
 
     plt.tight_layout()
-    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/nees_{SIM_TIME}.pdf')
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/nees.pdf')
 
     ##########################
     ##### PRINT RESULTS ######

@@ -53,7 +53,8 @@ class GVI:
                     k+=state_dof
         self.information = force_PSD(self.information)
         L, D, _ = scipy.linalg.ldl(self.information, lower=True)
-        self.covariance = self.compute_covariance(L, D)
+        
+        self.covariance = force_PSD(scipy.linalg.pinv(self.information))
 
         # Update states accordingly
         phi = np.zeros((1,1))
@@ -91,7 +92,7 @@ class GVI:
             L, D, _ = scipy.linalg.ldl(self.new_information, lower=True)
             
             # self.new_covariance = force_PSD(self.compute_covariance(L, D))
-            self.new_covariance = force_PSD(scipy.linalg.inv(self.new_information))
+            self.new_covariance = force_PSD(scipy.linalg.pinv(self.new_information))
             # This has been a bit stabler
             # delta_mu, _, _, _ = np.linalg.lstsq(self.new_information, -phi_dx, rcond=None)
             delta_mu = scipy.linalg.solve(self.new_information, -phi_dx)
