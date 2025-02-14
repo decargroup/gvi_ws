@@ -3,20 +3,21 @@ import numpy as np
 import navlie as nav
 from gvi import GVI
 from models import Simulator, NonLinearLaserRangeFinder, LaserRangeFinder, DoubleIntegrator, StereoCamera
-from factors import construct_factor_list, limit_data
+from factors import construct_factor_list
 from navlie.lib.states import VectorState
 from navlie.types import  StateWithCovariance
 from util.psd import force_PSD
 import matplotlib.pyplot as plt
 from scipy.linalg import block_diag
 from abc import abstractmethod
-
+import timeit
 
 if __name__== '__main__':
     NOISE_ON = True
     LINEAR = False
     STEREO = True
     BACKTRACK = False
+    TIME_IT = True
     SIM_TIME = 3
     CUB_METHOD = 'GH' # 'spherical' # 
     GH_DEG = 3
@@ -92,7 +93,13 @@ if __name__== '__main__':
 
     gvi = GVI(factored_states = factored_state_list, total_dim = state_dof*len(input_data_lim), backtrack_on = BACKTRACK, debug = True)
     # %%
-    gvi.solve()
+    if TIME_IT:
+        elapsed_time = timeit.timeit(gvi.solve, number=1)
+        print(f"GVI solved in: {elapsed_time:.6f} seconds")
+        print(f"For state size x: {gvi.mean.shape[0]}")
+        print(" -------------------------- ")
+    else:
+        gvi.solve()
 
     #####################
     ##### PLOT GVI ######
@@ -140,8 +147,15 @@ if __name__== '__main__':
     #######################
 
     estimator = nav.BatchEstimator(solver_type="GN", verbose=True)
-    estimate_list_map, opt_results = estimator.solve(x0=x0.state, P0 = x0.covariance, input_data=input_data_lim, process_model=proc_model, meas_data=meas_data_lim, return_opt_results=True)
-    
+    if TIME_IT:
+        timer = timeit.default_timer
+        start_time_map = timer()
+        estimate_list_map, opt_results = estimator.solve(x0=x0_state, P0 = P0, input_data=input_data_lim, process_model=proc_model, meas_data=meas_data_lim, return_opt_results=True)
+        elapsed_time_map = timer() - start_time_map
+        print(f"MAP solved in: {elapsed_time_map:.6f} seconds")
+        print(" -------------------------- ")
+    else:
+        estimate_list_map, opt_results = estimator.solve(x0=x0_state, P0 = P0, input_data=input_data_lim, process_model=proc_model, meas_data=meas_data_lim, return_opt_results=True)
 
     estimate_stamps_map = [float(x.state.stamp) for x in estimate_list_map]
     gt_stamps = [x.stamp for x in gt_data_lim]

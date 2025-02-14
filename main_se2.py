@@ -1,0 +1,198 @@
+# %%
+# General Imports
+import numpy as np
+import navlie as nav
+from typing import List
+import matplotlib.pyplot as plt
+import timeit
+
+# Navlie Imports
+from navlie.lib import VectorState, SE2State
+from navlie.types import  StateWithCovariance
+from navlie.lib.models import PointRelativePositionSLAM, PointRelativePosition, BodyFrameVelocity, RangePointToAnchor
+from pymlg.numpy.se2 import SE2, SO2
+from pymlg.numpy.se3 import SO3
+# GVI Import
+from gvi import GVI
+from factors import construct_planar_factor_list, construct_from_map
+from util.map_batch import construct_planar_map
+
+
+if __name__=="__main__":
+    np.random.seed(2)
+    T_END = 0.2
+    TIME_IT = False
+    NOISE = True
+    MAP_INIT = False
+    BACKTRACK = False
+    CUB_METHOD = 'GH' # 'spherical' # 
+    GH_DEG = 3
+    POSE_KEY_STR = 'x'
+    LANDMARK_KEY_STR = 'l'
+
+    
+    # Landmark Setup Generation
+    landmark_positions = [[2,1]]
+    landmark_states = [VectorState(landmark, state_id=f"{LANDMARK_KEY_STR}{i}") for i, landmark in enumerate(landmark_positions)]
+
+    # Meas Model
+    R_d = np.identity(2) * 1e-1
+    meas_models_gen = [PointRelativePosition(landmark_position=np.array([l.value]), R=R_d, landmark_id='l0') for l in landmark_states]
+
+    # R_d = np.identity(1) * 1e-1
+    # meas_models_gen = [RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states]
+    meas_model_freq = 10
+
+    # Process Model
+    Q_d = np.identity(3) * 0.2
+    process_model = BodyFrameVelocity(Q = Q_d)
+    proc_model_freq = 100
+
+    # Input Profile
+    input_profile = lambda t, x: np.array([np.cos(0.1*t), 1.0, 0])
+    
+    # Initial Conditions
+    x0_state = SE2State(value=np.array([0,0,0]), stamp=0, state_id=f"{POSE_KEY_STR}{0}", direction='right')
+    P0 = np.identity(x0_state.dof) * 1e-6
+    x0 = StateWithCovariance(state=x0_state, covariance=P0)
+    state_dof = x0_state.dof
+    
+    # Data Generation
+    dg = nav.DataGenerator(
+    process_model,
+    input_profile,
+    Q_d,
+    input_freq=proc_model_freq,
+    meas_model_list=meas_models_gen,
+    meas_freq_list=[meas_model_freq] * len(meas_models_gen))
+    gt_poses, input_data, meas_data = dg.generate(x0_state, start=0.0, stop=T_END, noise=NOISE)
+
+    input_data_lim = input_data[:]
+    meas_data_lim = meas_data[:]
+    gt_data_lim = gt_poses[:]
+    # gt_data_lim = gt_poses[0:2]
+    # input_data_lim = input_data[0:2]
+    # meas_data_lim = meas_data[0:1]
+
+    # MAP Computation
+    print('Starting MAP Estimation')
+    problem, init_pose_est = construct_planar_map(x0=x0_state, P0=P0, input_data=input_data_lim, process_model=process_model, meas_data=meas_data_lim)
+    if TIME_IT:
+        timer = timeit.default_timer
+        start_time_map = timer()
+        opt_results = problem.solve()
+        elapsed_time_map = timer() - start_time_map
+        print(f"MAP solved in: {elapsed_time_map:.6f} seconds")
+        print(" -------------------------- ")
+    else:
+        opt_results = problem.solve()
+    
+    # print(opt_results["summary"])
+    variables_opt = opt_results["variables"]
+    estimate_list_map: List[nav.types.StateWithCovariance] = []
+    pose_list_map: List[SE2State] = []
+    for pose in init_pose_est:
+        state = variables_opt[pose.state_id]
+        # Extract the covariance for only this current pose state
+        cov = problem.get_covariance_block(pose.state_id, pose.state_id)
+        estimate_list_map.append(StateWithCovariance(state, cov))
+        pose_list_map.append(state)
+    
+    estimate_stamps_map = [float(x.state.stamp) for x in estimate_list_map]
+    gt_stamps = [x.stamp for x in gt_data_lim]
+    matches = nav.associate_stamps(estimate_stamps_map, gt_stamps)
+
+    est_list_map = []
+    gt_list = []
+    for match in matches:
+        gt_list.append(gt_data_lim[match[1]])
+        est_list_map.append(estimate_list_map[match[0]])
+
+
+    # %%
+    # GVI Computation
+    # factored_state_list = construct_planar_factor_list(x0=x0_state, P0=P0, input_data=input_data_lim, meas_data=meas_data_lim, proc_model=process_model, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
+    if MAP_INIT:
+        factored_state_list = construct_from_map(opt_variables=variables_opt, problem=problem, input_data=input_data_lim, meas_data=meas_data_lim, proc_model=process_model, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
+    else:
+        factored_state_list = construct_planar_factor_list(x0=x0_state, P0=P0, input_data=input_data_lim, meas_data=meas_data_lim, proc_model=process_model, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
+
+    gvi = GVI(factored_states = factored_state_list, total_dim = state_dof*len(input_data_lim), backtrack_on = BACKTRACK, debug = True)
+    
+    if MAP_INIT:
+        gvi.from_map(map_covariance=problem.compute_covariance())
+    
+    if TIME_IT:
+        elapsed_time = timeit.timeit(gvi.solve, number=1)
+        print(f"GVI solved in: {elapsed_time:.6f} seconds")
+        print(f"For state size x: {gvi.mean.shape[0]}")
+        print(" -------------------------- ")
+    else:
+        gvi.solve()
+    #####################
+    ##### PLOT GVI ######
+    #####################
+    def get_se2_estimate(vector_list:List[StateWithCovariance]) -> List[StateWithCovariance]:
+        est_list = []
+        for x in vector_list:
+            state = x.state
+            P = x.covariance
+            se2_val = SE2.from_components(C=state.value[0], r=state.value[1:])
+            # se2_val = SE2.Exp(x.state.value)
+            se2_state = SE2State(value=se2_val, stamp=x.stamp)
+            se2_state_covar = StateWithCovariance(state=se2_state, covariance=P)
+            est_list.append(se2_state_covar)
+
+        return est_list
+    estimate_list_gvi_vec = gvi.get_estimate_list()
+    estimate_list_gvi = get_se2_estimate(estimate_list_gvi_vec)
+    pose_list_gvi = [x.state for x in estimate_list_gvi]
+    estimate_stamps = [float(x.stamp) for x in estimate_list_gvi]
+    gt_stamps = [x.stamp for x in gt_data_lim]
+
+    matches = nav.associate_stamps(estimate_stamps, gt_stamps)
+
+    est_list_gvi = []
+    gt_list = []
+    for match in matches:
+        gt_list.append(gt_data_lim[match[1]])
+        est_list_gvi.append(estimate_list_gvi[match[0]])
+
+    # Postprocess the results and plot
+    results_map = nav.GaussianResultList.from_estimates(est_list_map, gt_list)
+    results_gvi = nav.GaussianResultList.from_estimates(est_list_gvi, gt_list)
+
+    fig, ax = nav.plot_error(results_map, label='MAP')
+    ax[0].set_ylabel(r'$\theta$ (rad)')
+    ax[0].plot(results_gvi.stamp, results_gvi.error[:, 0], label='ESGVI', linestyle='--')
+    ax[0].fill_between(results_gvi.stamp, results_gvi.three_sigma[:, 0], -results_gvi.three_sigma[:, 0], alpha=0.1, color='orange')
+    ax[1].set_ylabel(r'$x$ (m)')
+    ax[1].plot(results_gvi.stamp, results_gvi.error[:, 1], label='ESGVI', linestyle='--')
+    ax[1].fill_between(results_gvi.stamp, results_gvi.three_sigma[:, 1], -results_gvi.three_sigma[:, 1], alpha=0.1, color='orange')
+    ax[2].set_ylabel(r'$y$ (m)')
+    ax[2].plot(results_gvi.stamp, results_gvi.error[:, 2], label='ESGVI', linestyle='--')
+    ax[2].fill_between(results_gvi.stamp, results_gvi.three_sigma[:, 2], -results_gvi.three_sigma[:, 2], alpha=0.1, color='orange')
+    ax[1].set_xlabel("Time (s)")
+    ax[0].legend(loc='upper right')
+    ax[1].legend()
+    ax[2].legend()
+    plt.tight_layout()
+
+    # Poses Plot
+    fig, ax = nav.plot_poses(poses=pose_list_map, step=100, label='MAP')
+    fig, ax = nav.plot_poses(pose_list_gvi, step=100, ax=ax,label="ESGVI")
+    fig, ax = nav.plot_poses(poses=gt_data_lim, ax=ax, step=1000, label='Ground Truth')
+    for l in landmark_states:
+        ax.plot(l.value[0], l.value[1], 'x')
+    ax.set_title("Estimated poses")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.legend()
+    plt.show()
+
+    print(" Method |    Mean Pos Error     |  Mean Vel Error")
+    print("-----------------------------------------------  ")
+    print(f" ESGVI  | {np.mean(results_gvi.error[:,0])}  | {np.mean(results_gvi.error[:,1])} | {np.mean(results_gvi.error[:,2])}")
+    print(f" MAP    | {np.mean(results_map.error[:,0])} | {np.mean(results_map.error[:,1])} | {np.mean(results_map.error[:,2])}")
+
+ # %%

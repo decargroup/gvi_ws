@@ -1,17 +1,20 @@
 import numpy as np
 import scipy.linalg
 import navlie as nav
+from pymlg.numpy.se2 import SE2, SO2
 from typing import Callable, Optional, List
 from util.cubatures import gh_cubature, spherical_cubature
-from navlie.lib.states import VectorState
+from navlie.lib.states import VectorState, SE2State, State
 from navlie.types import ProcessModel, Measurement, Input, StateWithCovariance
+from navlie.batch.problem import Problem
+from navlie.utils import find_nearest_stamp_idx
 from util.psd import force_PSD, force_sym
 from abc import abstractmethod
 
 class FactoredState:
     def __init__(self, mean:np.ndarray, covariance:np.ndarray, proj_matrix:np.ndarray, stamp:float, cubature_type= 'GH', gh_degree = 3):
-        self.mean:np.ndarray = np.copy(mean.reshape((-1,1)))
-        self.covariance:np.ndarray = np.copy(covariance)
+        self.mean:np.ndarray = np.copy(mean.reshape((-1,1))).astype(np.float64)
+        self.covariance:np.ndarray = np.copy(covariance).astype(np.float64)
         self.sqrt_covariance:np.ndarray = np.linalg.cholesky(covariance)
         self.information:np.ndarray = force_PSD(scipy.linalg.inv(covariance))
         self.projection = np.copy(proj_matrix)
@@ -68,18 +71,18 @@ class FactoredState:
             expect_mu_phi += w * (self._sigma_pts[i] - self.mean) * phi_k_l
             expect_mu_mu_phi += w * (self._sigma_pts[i] - self.mean) @ (self._sigma_pts[i] - self.mean).T  * phi_k_l
         
-        self.expect_scalar = expect_phi.copy()
-        self.expect_column = expect_mu_phi.copy()
-        self.expect_matrix = expect_mu_mu_phi.copy()
+        self.expect_scalar = np.copy(expect_phi)
+        self.expect_column = np.copy(expect_mu_phi)
+        self.expect_matrix = np.copy(expect_mu_mu_phi)
         return
 
     
     def update_factor(self, total_mean, total_information, total_covariance):
         # Project mean, information, covariance
-        self.mean = self.projection @ total_mean
-        self.information = self.projection @ total_information @ self.projection.T
+        self.mean = self.projection @ np.copy(total_mean)
+        self.information = self.projection @ np.copy(total_information) @ self.projection.T
         # self.information = force_PSD(self.information)
-        self.covariance = self.projection @ total_covariance @ self.projection.T
+        self.covariance = self.projection @ np.copy(total_covariance) @ self.projection.T
         # self.covariance = force_PSD(self.covariance)
         # Recompute sigma points around new mean / covariance
         self.generate_new_sigma_pts()
@@ -107,16 +110,15 @@ class ProcessFactor(FactoredState):
         super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree)
         # Individual state dof
         self.state_dof = int(self.dof / 2)
-        self.y_k:np.ndarray = None
 
-    def link_dependent_state(self, process_model:ProcessModel, u_k_1:Input):
-        self.process_model = process_model
+    def link_dependent_state(self, process_model:ProcessModel, u_k_1:Input, x_k:State = None):
+        self.process_model:ProcessModel = process_model
         # TODO: Check if need this
         # self.prev_state = prev_state
         self.u = u_k_1
         self.dt = self.stamp - self.u.stamp
         # TODO: Fix the None arguments
-        self.Q = process_model.covariance(None, None, self.dt)
+        self.Q = process_model.covariance(x_k, self.u, self.dt)
         self.Q_inv = force_PSD(scipy.linalg.inv(self.Q))
         self.compute_expectations()
 
@@ -198,6 +200,40 @@ class MeasurementFactor(FactoredState):
     def get_covariance(self):
         return super().get_covariance()
     
+class PlanarProcessFactor(ProcessFactor):
+    def __init__(self, mean, covariance, proj_matrix, stamp, cubature_type='GH', gh_degree=3):
+        super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree)
+    
+    def eval_phi(self, sigma_point):
+        to_planar = lambda x: np.vstack((SO2.Log(x.value[0:2, 0:2]), x.value[0:2, 2].reshape((-1,1))))
+        # Get sigma points for each associated state
+        sp_x_k_1 = sigma_point.reshape((-1,1))[0:self.state_dof]
+        sp_x_k = sigma_point.reshape((-1,1))[self.state_dof:]
+        # Evaluate process model with sigma x_k_minus_1
+        x_k_1_val = SE2.from_components(C=sp_x_k_1[0], r=sp_x_k_1[1:])
+        x_k_val = SE2.from_components(C=sp_x_k[0], r=sp_x_k[1:])
+        x_k_1 = SE2State(value=x_k_1_val, stamp=self.u.stamp)
+        x_k = SE2State(value=x_k_val, stamp=self.stamp)
+        proc_model_state = self.process_model.evaluate(x_k_1, self.u, self.dt)
+        proc_diff = x_k.minus(proc_model_state).reshape((-1,1))
+        # proc_diff = sp_x_k - to_planar(proc_model_state)
+        phi = 0.5 * proc_diff.T @ self.Q_inv @ proc_diff
+        return phi
+
+class PlanarMeasurementFactor(MeasurementFactor):
+    def __init__(self, mean, covariance, proj_matrix, stamp, cubature_type='GH', gh_degree=3):
+        super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree)
+    def eval_phi(self, sigma_point):
+        # Create SE2 State from sigma points
+        sp_x_k = sigma_point.reshape((-1,1))
+        sp_se2 = SE2.from_components(C=SO2.Exp(sp_x_k[0]), r=sp_x_k[1:])
+        sp_state = SE2State(value=sp_se2, stamp=self.stamp)
+        meas_diff = self.y_k - self.meas_model.evaluate(sp_state).reshape((-1,1))
+        phi = 0.5 * meas_diff.T @ self.R_k_inv @ meas_diff
+        return phi
+
+
+
 def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_data:List[Measurement], proc_model:ProcessModel, cubature_type ='GH', gh_deg = 3):
     factored_state_list = []
     factored_stamp_list = []
@@ -268,14 +304,152 @@ def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_d
     
     return factored_state_list
 
-def limit_data(input_data:List[Input], meas_data:List[Measurement], proc_model:ProcessModel, max_length=100):
-    meas_stamps = [y.stamp for y in meas_data]
-    if len(input_data) > max_length:
-        input_data_lim = input_data[:max_length]
-        last_u = input_data_lim[-1]
-        last_y_idx = nav.find_nearest_stamp_idx(meas_stamps, last_u.stamp)
-        meas_data_lim = meas_data[:last_y_idx]
-        return input_data_lim, meas_data_lim
-        
+def construct_planar_factor_list(x0:SE2State, P0:np.ndarray, input_data:List[Input], meas_data:List[Measurement], proc_model:ProcessModel, cubature_type ='GH', gh_deg = 3):
+    to_planar = lambda x: np.vstack((SO2.Log(x.value[0:2, 0:2]), x.value[0:2, 2].reshape((-1,1)))) #x.group.Log(x.value)
+    factored_state_list = []
+    factored_stamp_list = []
+    state_dof = x0.dof
+
+    # Define prior
+    proj_0 = np.zeros((state_dof, len(input_data)*state_dof))
+    proj_0[:, :state_dof] = np.eye(state_dof)
     
+    prior_factor = PriorFactor(mean=to_planar(x0), covariance=P0, proj_matrix=proj_0, stamp=x0.stamp, gh_degree=gh_deg, cubature_type=cubature_type)
+    x0_state_covar = StateWithCovariance(VectorState(value=to_planar(x0)), covariance=P0)
+    prior_factor.link_prior(x0=x0_state_covar)
+    factored_state_list.append(prior_factor)
+    factored_stamp_list.append(x0.stamp)
+
+    # Define process prior
+    proj_proc_empty = np.zeros((2*state_dof, len(input_data)*state_dof))
+    proj_idx = 0
+    x_k_1 = x0.copy()
+    P_k_1 = force_sym(P0)
+    for i in range(len(input_data)-1):
+        u_k_1:Input = input_data[i]
+        u_k:Input = input_data[i+1]
+        dt_u = u_k.stamp - u_k_1.stamp
+        x_k = proc_model.evaluate(x_k_1, u=u_k_1, dt=dt_u)
+        A_k = proc_model.jacobian(x_k_1, u=u_k_1, dt=dt_u)
+        Q_k = proc_model.covariance(x=x_k_1, u=u_k_1, dt=dt_u)
+        P_k = A_k @ P_k_1 @ A_k.T + Q_k
+        P_k = force_sym(P_k)
+        x_k_1_p = to_planar(x_k_1)
+        x_k_p = to_planar(x_k)
+        p_mean = np.vstack((x_k_1_p.reshape((-1,1)), x_k_p.reshape((-1,1))))
+        if i==0:
+            P_covar = np.block([[P_k_1, np.zeros_like(P_k)],
+                                [np.zeros_like(P_k), P_k]])
+        else:
+            P_covar = np.block([[P_k_1, np.zeros_like(P_k)],
+                                [np.zeros_like(P_k), P_k]])
+            # P_covar = np.block([[P_k_1, P_k_1 @ A_k.T],
+            #                     [A_k @ P_k_1, P_k]])
+        P_covar = force_sym(P_covar)
+        proj_k = proj_proc_empty.copy()
+        proj_k[:, proj_idx:proj_idx+(2*state_dof)] = np.eye(2*state_dof)
+        p_fac_k = PlanarProcessFactor(mean=p_mean, covariance=P_covar, proj_matrix=proj_k, stamp=u_k.stamp, gh_degree=gh_deg, cubature_type=cubature_type)
+        p_fac_k.link_dependent_state(process_model=proc_model, u_k_1 = u_k_1, x_k=x_k_1)
+        factored_state_list.append(p_fac_k)
+        factored_stamp_list.append(u_k.stamp)
+        proj_idx += state_dof
+        x_k_1 = x_k.copy()
+        P_k_1 = P_k.copy()
+
+    # Define measurement factors
+    proj_meas_empty = np.zeros((state_dof, len(input_data)*state_dof))
+    for i in range(len(meas_data)):
+        meas:Measurement = meas_data[i]
+        # TODO: Fix assumption that measurement is synchronized with inputs
+        if meas.stamp<=input_data[-1].stamp:
+            x_k_idx = factored_stamp_list.index(meas.stamp)
+            x_k:FactoredState = factored_state_list[x_k_idx]
+            
+            proj_k = proj_meas_empty.copy()
+            if isinstance(x_k, PriorFactor):
+                proj_k = x_k.projection.copy()
+                # x_k.link_measurement(meas=meas)
+            else:
+                x_k:ProcessFactor
+                proj_k = x_k.projection[x_k.state_dof:, :].copy()
+                # x_k.link_measurement(meas=meas)
+            meas_factor = PlanarMeasurementFactor(mean=x_k.get_mean(), covariance=x_k.get_covariance(), stamp=meas.stamp, proj_matrix=proj_k, gh_degree=gh_deg, cubature_type=cubature_type)
+            meas_factor.link_measurement(meas=meas)
+            factored_state_list.append(meas_factor)
+    
+    return factored_state_list
+        
+def construct_from_map(opt_variables, problem:Problem, input_data:List[nav.types.Input], meas_data:List[Measurement], proc_model:ProcessModel, cubature_type ='GH', gh_deg = 3) -> List[FactoredState]:
+    to_planar = lambda x: np.vstack((SO2.Log(x.value[0:2, 0:2]), x.value[0:2, 2].reshape((-1,1)))) #x.group.Log(x.value)
+    factored_state_list = []
+    factored_stamp_list = []
+
+    # Define prior
+    x0_state:State = opt_variables['x0']
+    state_dof = x0_state.dof
+    P0 = problem.get_covariance_block(x0_state.state_id, x0_state.state_id)
+    
+    proj_0 = np.zeros((state_dof, len(input_data)*state_dof))
+    proj_0[:, :state_dof] = np.eye(state_dof)
+
+    prior_factor = PriorFactor(mean=to_planar(x0_state.copy()), covariance=P0, proj_matrix=proj_0, stamp=x0_state.stamp, gh_degree=gh_deg, cubature_type=cubature_type)
+    x0_state_covar = StateWithCovariance(VectorState(value=to_planar(x0_state.copy()), stamp=x0_state.stamp), covariance=P0)
+    prior_factor.link_prior(x0=x0_state_covar)
+    factored_state_list.append(prior_factor)
+    factored_stamp_list.append(x0_state.stamp)
+
+    # Define process prior
+    proj_proc_empty = np.zeros((2*state_dof, len(input_data)*state_dof))
+    proj_idx = 0
+    for i in range(len(input_data)-1):
+        u_k_1:Input = input_data[i]
+        u_k:Input = input_data[i+1]
+        dt_u = u_k.stamp - u_k_1.stamp
+        if i+1 == 70:
+            pass
+        x_k_1:State = opt_variables['x' + str(i)].copy()
+        P_k_1 = problem.get_covariance_block(x_k_1.state_id, x_k_1.state_id)
+        x_k:State = opt_variables['x'+str(i+1)].copy()
+        P_k = problem.get_covariance_block(x_k.state_id, x_k.state_id)
+        P_joint = problem.get_covariance_block(x_k.state_id, x_k_1.state_id)
+        x_k_1_p = to_planar(x_k_1)
+        x_k_p = to_planar(x_k)
+        p_mean = np.vstack((x_k_1_p.reshape((-1,1)), x_k_p.reshape((-1,1))))
+        P_covar = np.block([[P_k_1, np.zeros((3,3))],
+                            [np.zeros((3,3)), P_k]])
+        P_covar = force_sym(P_covar)
+        proj_k = proj_proc_empty.copy()
+        proj_k[:, proj_idx:proj_idx+(2*state_dof)] = np.eye(2*state_dof)
+        p_fac_k = PlanarProcessFactor(mean=p_mean, covariance=P_covar, proj_matrix=proj_k, stamp=u_k.stamp, gh_degree=gh_deg, cubature_type=cubature_type)
+        p_fac_k.link_dependent_state(process_model=proc_model, u_k_1 = u_k_1, x_k=x_k_1)
+        factored_state_list.append(p_fac_k)
+        factored_stamp_list.append(u_k.stamp)
+        proj_idx += state_dof
+
+    # Define measurement factors
+    proj_meas_empty = np.zeros((state_dof, len(input_data)*state_dof))
+    for i in range(len(meas_data)):
+        meas:Measurement = meas_data[i]
+        if meas.stamp<=input_data[-1].stamp:
+            x_k_idx = find_nearest_stamp_idx(factored_stamp_list, meas.stamp)
+            x_k:FactoredState = factored_state_list[x_k_idx]
+            proj_k = proj_meas_empty.copy()
+            if isinstance(x_k, PriorFactor):
+                proj_k = x_k.projection.copy()
+                # x_k.link_measurement(meas=meas)
+            else:
+                x_k:ProcessFactor
+                proj_k = x_k.projection[x_k.state_dof:, :].copy()
+                # x_k.link_measurement(meas=meas)
+            meas_factor = PlanarMeasurementFactor(mean=x_k.get_mean(), covariance=x_k.get_covariance(), stamp=meas.stamp, proj_matrix=proj_k, gh_degree=gh_deg, cubature_type=cubature_type)
+            meas_factor.link_measurement(meas=meas)
+            factored_state_list.append(meas_factor)
+
+    return factored_state_list
+
+
+
+
+
+
 

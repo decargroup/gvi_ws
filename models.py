@@ -4,7 +4,30 @@ import navlie as nav
 from scipy import integrate
 from scipy import stats
 from navlie.types import MeasurementModel, State, Measurement, ProcessModel
-from navlie.lib.states import VectorState, VectorInput
+from navlie.lib.states import VectorState, VectorInput, SE2State
+
+
+class WheelEncoder(MeasurementModel):
+    def __init__(self, R_d:np.ndarray)-> None:
+        # R_d = diag(fwd_vel_var, side_slip_var, ang_vel_var)
+        self.R = np.atleast_2d(R_d)
+        return
+    
+    def evaluate(self, x:nav.State):
+        if isinstance(x, SE2State):
+            theta = x.group.Log(x)[0]
+        elif isinstance(x, VectorState):
+            theta = x.value[0]
+        else:
+            raise ValueError("WheelEncoder must take SE2State or VectorState as input.")
+        y = np.zeros((3,1))
+        y[0,0] = np.cos(theta) + np.sin(theta)
+        y[1,0] = -np.sin(theta) + np.cos(theta)
+        y[2,0] = 1
+        return y
+    
+    def covariance(self, x):
+        return self.R
 
 class LaserRangeFinder(MeasurementModel):
     def __init__(self, R_d) -> None:
