@@ -1,9 +1,9 @@
 # %%
 import numpy as np
 import navlie as nav
-from gvi import GVI
+from mlg_gvi import GVI
 from models import Simulator, NonLinearLaserRangeFinder, LaserRangeFinder, DoubleIntegrator, StereoCamera
-from factors import construct_factor_list
+from mlg_factors import construct_factor_list
 from navlie.lib.states import VectorState
 from navlie.types import  StateWithCovariance
 from util.psd import force_PSD
@@ -126,7 +126,7 @@ if __name__== '__main__':
     ax_gvi[1].set_ylabel(r'$\dot{r}$ (m/s)')
     ax_gvi[1].set_xlabel("Time (s)")
     plt.tight_layout()
-    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_three_sigma.pdf')
+    # plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_three_sigma.pdf')
 
     
     # fig, ax = plt.subplots(2, 1)
@@ -185,7 +185,8 @@ if __name__== '__main__':
     ax[0].legend(loc='upper right')
     ax[1].legend()
     plt.tight_layout()
-    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_map_three_sigma.pdf')
+    plt.show()
+    # plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/esgvi_map_three_sigma.pdf')
 
     # Plot NEES
     fig, axs = nav.plot_nees(results_map, label='MAP')
@@ -194,7 +195,8 @@ if __name__== '__main__':
     axs.set_title("NEES")
 
     plt.tight_layout()
-    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/nees.pdf')
+    plt.show()
+    # plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/nees.pdf')
 
     ##########################
     ##### PRINT RESULTS ######
@@ -204,5 +206,4 @@ if __name__== '__main__':
     print("-----------------------------------------------  ")
     print(f" ESGVI  | {np.mean(results_gvi.error[:,0])}  | {np.mean(results_gvi.error[:,1])}")
     print(f" MAP    | {np.mean(results_map.error[:,0])} | {np.mean(results_map.error[:,1])}")
-
 # %%

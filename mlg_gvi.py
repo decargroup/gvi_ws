@@ -4,7 +4,7 @@ import scipy.linalg
 import navlie as nav
 from typing import Callable, Optional, List
 from util.cubatures import gh_cubature, spherical_cubature
-from factors import FactoredState, PriorFactor, ProcessFactor, MeasurementFactor
+from mlg_factors import FactoredMLGState, PriorFactor, ProcessFactor, MeasurementFactor
 from models import Simulator, NonLinearLaserRangeFinder, LaserRangeFinder, DoubleIntegrator
 from navlie.datagen import DataGenerator
 from navlie.lib.states import VectorState, VectorInput
@@ -16,7 +16,7 @@ from scipy.linalg import block_diag
 from abc import abstractmethod
 
 class GVI:
-    def __init__(self, factored_states:List[FactoredState], total_dim:int, backtrack_on = True, debug=False, max_iters=10, init_alpha=1.0):
+    def __init__(self, factored_states:List[FactoredMLGState], total_dim:int, backtrack_on = True, debug=False, max_iters=10, init_alpha=1.0):
         self.factored_states = factored_states
         self.total_dim = total_dim
         self.debug = debug
@@ -37,22 +37,18 @@ class GVI:
             
             if isinstance(x_k, PriorFactor):
                 self.factor_dof = x_k.dof
+                self.mean[k:k+x_k.dof] = x_k.get_mean_vector()
+                self.information[k:k+x_k.dof, k:k+x_k.dof] = x_k.get_information()
+                k+= x_k.dof
             
             if isinstance(x_k, ProcessFactor):
-                if k == 0:
-                    dof = x_k.dof
-                    state_dof = x_k.state_dof
-                    self.mean[k:k+dof] = np.copy(x_k.mean)
-                    self.information[k:k+dof, k:k+dof] = np.copy(x_k.information)
-                    k+=dof
-                else:
-                    state_dof = x_k.state_dof
-                    self.mean[k:k+state_dof] = np.copy(x_k.get_mean())
-                    self.information[k:k+state_dof, k:k+state_dof] = np.copy(x_k.get_information())
-                    # Cross Information Terms
-                    self.information[k-state_dof:k, k:k+state_dof] = np.copy(x_k.information[0:state_dof,state_dof:])
-                    self.information[k:k+state_dof, k-state_dof:k] = np.copy(x_k.information[state_dof:, 0:state_dof])
-                    k+=state_dof
+                dof = x_k.dof
+                self.mean[k:k+dof] = x_k.get_mean_vector()
+                self.information[k:k+dof, k:k+dof] = x_k.get_information()
+                self.information[k-dof:k, k:k+dof] = x_k.get_cross_information()
+                self.information[k:k+dof, k-dof:k] = x_k.get_cross_information().T
+                k += dof
+                
         self.information = force_PSD(self.information)
 
         # TODO: Fix the sparsity of computing covariance
@@ -80,7 +76,7 @@ class GVI:
             self.new_information = np.zeros_like(self.information)
             prev_phi = 0.0
             for x_k in self.factored_states:
-                proj_k = x_k.projection
+                proj_k = x_k.total_projection
                 prev_phi += x_k.expect_scalar
                 phi_dx += proj_k.T @ x_k.phi_dx()
                 self.new_information += proj_k.T @ x_k.phi_dx_dx() @ proj_k
@@ -223,21 +219,22 @@ class GVI:
         est_list = []
         stamp_list = []
         for x_k in self.factored_states:
-            x_k:FactoredState
-            mean = x_k.get_mean()
+            x_k:FactoredMLGState
+            
+            state_k = x_k.get_mean()
             covar = x_k.get_covariance()
             stamp = x_k.stamp
-            state_k = VectorState(value=mean, stamp=stamp)
             est_k = StateWithCovariance(state=state_k, covariance=covar)
             if stamp not in stamp_list:
                 est_list.append(est_k)
                 stamp_list.append(stamp)
             else:
                 idx = nav.find_nearest_stamp_idx(stamp_list, stamp)
-                if (not np.allclose(mean.reshape((-1,1)), est_list[idx].state.value.reshape((-1,1)))) or (not np.allclose(covar, est_list[idx].covariance)):
+                
+                if (not np.allclose(state_k.value, est_list[idx].state.value)) or (not np.allclose(covar, est_list[idx].covariance)):
                     print(x_k, "at time: ", stamp)
                     print(x_k.projection)
-                    print(mean.ravel(), est_list[idx].state.value.ravel())
+                    print(state_k.value, est_list[idx].state.value)
                     print(covar, "\n", est_list[idx].covariance)
                     raise ValueError("Mean and covariance don't match")
         

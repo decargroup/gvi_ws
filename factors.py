@@ -4,7 +4,7 @@ import navlie as nav
 from pymlg.numpy.se2 import SE2, SO2
 from typing import Callable, Optional, List
 from util.cubatures import gh_cubature, spherical_cubature
-from navlie.lib.states import VectorState, SE2State, State
+from navlie.lib.states import VectorState, SE2State, State, CompositeState
 from navlie.types import ProcessModel, Measurement, Input, StateWithCovariance
 from navlie.batch.problem import Problem
 from navlie.utils import find_nearest_stamp_idx
@@ -12,7 +12,7 @@ from util.psd import force_PSD, force_sym
 from abc import abstractmethod
 
 class FactoredState:
-    def __init__(self, mean:np.ndarray, covariance:np.ndarray, proj_matrix:np.ndarray, stamp:float, cubature_type= 'GH', gh_degree = 3):
+    def __init__(self, mean:np.ndarray, covariance:np.ndarray, proj_matrix:np.ndarray, stamp:float, cubature_type= 'GH', gh_degree = 3, state_id=None):
         self.mean:np.ndarray = np.copy(mean.reshape((-1,1))).astype(np.float64)
         self.covariance:np.ndarray = np.copy(covariance).astype(np.float64)
         self.sqrt_covariance:np.ndarray = np.linalg.cholesky(covariance)
@@ -24,6 +24,7 @@ class FactoredState:
         self.expect_scalar:np.ndarray = None
         self.expect_column:np.ndarray = None
         self.expect_matrix:np.ndarray = None
+        self.state_id = state_id
         
         # Cubature Method
         if cubature_type=='GH':
@@ -36,7 +37,7 @@ class FactoredState:
         else:
             raise NotImplementedError("Implement other cubature methods")
         
-        # Generate Unit Sigma Points
+        # Generate Sigma Points
         self.generate_new_sigma_pts()
 
     def generate_new_sigma_pts(self):
@@ -106,7 +107,7 @@ class FactoredState:
         return self.covariance.copy()
             
 class ProcessFactor(FactoredState):
-    def __init__(self, mean, covariance, proj_matrix, stamp, cubature_type='GH', gh_degree=3):
+    def __init__(self, mean, covariance, proj_matrix, stamp, cubature_type='GH', gh_degree=3, state_id=None):
         super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree)
         # Individual state dof
         self.state_dof = int(self.dof / 2)
@@ -151,9 +152,9 @@ class PriorFactor(FactoredState):
         self.state_dof = self.dof
     
     def link_prior(self, x0:StateWithCovariance):
+        # Setup prior values
         self.x0_check = x0.state.value.copy().reshape((-1,1))
         self.P0_check = x0.covariance.copy()
-        # TODO: Maybe change this to current information
         self.P0_check_inv = force_PSD(scipy.linalg.inv(self.P0_check))
         self.compute_expectations()
 
@@ -171,8 +172,8 @@ class PriorFactor(FactoredState):
         return super().get_covariance()
 
 class MeasurementFactor(FactoredState):
-    def __init__(self, mean, covariance, proj_matrix, stamp, cubature_type='GH', gh_degree=3):
-        super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree)
+    def __init__(self, mean, covariance, proj_matrix, stamp, cubature_type='GH', gh_degree=3, state_id=None):
+        super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree, state_id=state_id)
         # Individual state dof
         self.state_dof = self.dof
     
@@ -199,6 +200,24 @@ class MeasurementFactor(FactoredState):
         return super().get_information()
     def get_covariance(self):
         return super().get_covariance()
+    
+class LandmarkFactor(FactoredState):
+    def __init__(self, mean, covariance, proj_matrix, stamp, state_id:str, cubature_type='GH', gh_degree=3):
+        super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree, state_id=state_id)
+        self.state_dof = self.dof
+
+    def eval_phi(self, sigma_point):
+        diff = sigma_point.reshape((-1,1)) - self.mean.reshape((-1,1))
+        phi = 0.5 * diff.T @ self.information @ diff
+        return phi
+    
+    def get_mean(self):
+        return super().get_mean()
+    def get_information(self):
+        return super().get_information()
+    def get_covariance(self):
+        return super().get_covariance()
+
     
 class PlanarProcessFactor(ProcessFactor):
     def __init__(self, mean, covariance, proj_matrix, stamp, cubature_type='GH', gh_degree=3):
@@ -231,6 +250,57 @@ class PlanarMeasurementFactor(MeasurementFactor):
         meas_diff = self.y_k - self.meas_model.evaluate(sp_state).reshape((-1,1))
         phi = 0.5 * meas_diff.T @ self.R_k_inv @ meas_diff
         return phi
+    
+
+class SLAMFactor(MeasurementFactor):
+    def __init__(self, mean, covariance, proj_matrix, stamp, cubature_type='GH', gh_degree=3):
+        super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree)
+        self.state_dof = self.dof
+        self.landmark_dof = None
+    
+    def link_landmark(self, landmark_factor:LandmarkFactor):
+        self.landmark_factor = landmark_factor
+        self.landmark_dof = landmark_factor.dof
+        self.projection = np.block([[self.projection], [landmark_factor.projection]])
+    
+    def eval_phi(self, state_sp:np.ndarray, landmark_sp:np.ndarray):
+        # Create SE2 State from sigma point
+        sp_x_k = state_sp.reshape((-1,1))
+        sp_se2 = SE2.from_components(C=SO2.Exp(sp_x_k[0]), r=sp_x_k[1:])
+        se2_state = SE2State(value=sp_se2, stamp=self.stamp, state_id=self.state_id)
+        # Create landmark state from sigma point
+        landmark_state = VectorState(value=landmark_sp, stamp=self.stamp, state_id=self.landmark_factor.state_id)
+        # Combine into composite state
+        slam_state = CompositeState(state_list=[se2_state, landmark_state], stamp=self.stamp)
+
+        # Evaluate Measurement Model
+        meas_diff = self.y_k - self.meas_model.evaluate(slam_state).reshape((-1,1))
+        # Evaluate prior factor
+        phi = 0.5 * meas_diff.T @ self.R_k_inv @ meas_diff
+        return phi
+    
+    def compute_expectations(self):
+        # TODO: Fix this for 
+        expect_mu_mu_phi = np.zeros((self.state_dof+self.landmark_dof, self.state_dof+self.landmark_dof))
+        expect_mu_phi = np.zeros((self.state_dof+self.landmark_dof,1))
+        expect_phi = np.zeros((1,1))
+        for i, w_state in enumerate(self._weights):
+            for j, w_land in enumerate(self.landmark_factor._sigma_pts):
+                phi_k_l = self.eval_phi(self._sigma_pts[i], self.landmark_factor._sigma_pts[j])
+                # TODO: Figure out how to combine this
+                # I'm thinking you'd need to stack in order to send information back to the landmark state, in order to force landmark state to agree with all measurements.
+                # Or maybe don't stack and just have them within the landmark factor itself
+                stack_sp = np.vstack((self._sigma_pts[i].reshape((-1,1)), self.landmark_factor._sigma_pts[j].reshape((-1,1))))
+                stack_mean = np.vstack((self.mean, self.landmark_factor.mean))
+                expect_phi += w_state * w_land * phi_k_l
+                expect_mu_phi += w_state * w_land * (stack_sp - stack_mean) * phi_k_l
+                expect_mu_mu_phi += w_state * (stack_sp - stack_mean) @ (stack_sp - stack_mean).T  * phi_k_l
+        
+        self.expect_scalar = np.copy(expect_phi)
+        self.expect_column = np.copy(expect_mu_phi)
+        self.expect_matrix = np.copy(expect_mu_mu_phi)
+        return
+        
 
 
 

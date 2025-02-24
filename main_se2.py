@@ -20,11 +20,12 @@ from util.map_batch import construct_planar_map
 
 if __name__=="__main__":
     np.random.seed(2)
-    T_END = 0.2
+    T_END = 2.0
     TIME_IT = False
     NOISE = True
-    MAP_INIT = False
-    BACKTRACK = False
+    MAP_INIT = True
+    BACKTRACK = True
+    INIT_ALPHA = 3e-6
     CUB_METHOD = 'GH' # 'spherical' # 
     GH_DEG = 3
     POSE_KEY_STR = 'x'
@@ -32,7 +33,7 @@ if __name__=="__main__":
 
     
     # Landmark Setup Generation
-    landmark_positions = [[2,1]]
+    landmark_positions = [[2,1], [0,1]]
     landmark_states = [VectorState(landmark, state_id=f"{LANDMARK_KEY_STR}{i}") for i, landmark in enumerate(landmark_positions)]
 
     # Meas Model
@@ -53,7 +54,7 @@ if __name__=="__main__":
     
     # Initial Conditions
     x0_state = SE2State(value=np.array([0,0,0]), stamp=0, state_id=f"{POSE_KEY_STR}{0}", direction='right')
-    P0 = np.identity(x0_state.dof) * 1e-6
+    P0 = np.identity(x0_state.dof) * 1e-3
     x0 = StateWithCovariance(state=x0_state, covariance=P0)
     state_dof = x0_state.dof
     
@@ -117,7 +118,7 @@ if __name__=="__main__":
     else:
         factored_state_list = construct_planar_factor_list(x0=x0_state, P0=P0, input_data=input_data_lim, meas_data=meas_data_lim, proc_model=process_model, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
 
-    gvi = GVI(factored_states = factored_state_list, total_dim = state_dof*len(input_data_lim), backtrack_on = BACKTRACK, debug = True)
+    gvi = GVI(factored_states = factored_state_list, total_dim = state_dof*len(input_data_lim), backtrack_on = BACKTRACK, debug = True, init_alpha=INIT_ALPHA)
     
     if MAP_INIT:
         gvi.from_map(map_covariance=problem.compute_covariance())
@@ -130,7 +131,7 @@ if __name__=="__main__":
     else:
         gvi.solve()
     #####################
-    ##### PLOT GVI ######
+    #### Process GVI ####
     #####################
     def get_se2_estimate(vector_list:List[StateWithCovariance]) -> List[StateWithCovariance]:
         est_list = []
@@ -162,6 +163,11 @@ if __name__=="__main__":
     results_map = nav.GaussianResultList.from_estimates(est_list_map, gt_list)
     results_gvi = nav.GaussianResultList.from_estimates(est_list_gvi, gt_list)
 
+    # %%
+    #####################
+    ##### PLOT GVI ######
+    #####################
+
     fig, ax = nav.plot_error(results_map, label='MAP')
     ax[0].set_ylabel(r'$\theta$ (rad)')
     ax[0].plot(results_gvi.stamp, results_gvi.error[:, 0], label='ESGVI', linestyle='--')
@@ -177,6 +183,7 @@ if __name__=="__main__":
     ax[1].legend()
     ax[2].legend()
     plt.tight_layout()
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_3sigma.pdf')
 
     # Poses Plot
     fig, ax = nav.plot_poses(poses=pose_list_map, step=100, label='MAP')
@@ -188,11 +195,22 @@ if __name__=="__main__":
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.legend()
+    plt.tight_layout()
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_traj.pdf')
     plt.show()
 
+    # Plot NEES
+    fig, axs = nav.plot_nees(results_map, label='MAP', confidence_interval=0.997)
+    fig, axs = nav.plot_nees(results_gvi, ax=axs, label='ESGVI', confidence_interval=0.997)
+    axs.set_xlabel("Time (s)")
+    axs.set_title("NEES")
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_NEES.pdf')
+
+    # Comparison table
     print(" Method |    Mean Pos Error     |  Mean Vel Error")
     print("-----------------------------------------------  ")
     print(f" ESGVI  | {np.mean(results_gvi.error[:,0])}  | {np.mean(results_gvi.error[:,1])} | {np.mean(results_gvi.error[:,2])}")
     print(f" MAP    | {np.mean(results_map.error[:,0])} | {np.mean(results_map.error[:,1])} | {np.mean(results_map.error[:,2])}")
+
 
  # %%
