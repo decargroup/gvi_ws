@@ -4,7 +4,7 @@ import scipy.linalg
 import navlie as nav
 from typing import Callable, Optional, List
 from util.cubatures import gh_cubature, spherical_cubature
-from mlg_factors import FactoredMLGState, PriorFactor, ProcessFactor, MeasurementFactor
+from mlg_factors import FactoredState, PriorFactor, ProcessFactor, MeasurementFactor
 from models import Simulator, NonLinearLaserRangeFinder, LaserRangeFinder, DoubleIntegrator
 from navlie.datagen import DataGenerator
 from navlie.lib.states import VectorState, VectorInput
@@ -16,7 +16,7 @@ from scipy.linalg import block_diag
 from abc import abstractmethod
 
 class GVI:
-    def __init__(self, factored_states:List[FactoredMLGState], total_dim:int, backtrack_on = True, debug=False, max_iters=10, init_alpha=1.0):
+    def __init__(self, factored_states:List[FactoredState], total_dim:int, backtrack_on = True, debug=False, max_iters=10, init_alpha=1.0):
         self.factored_states = factored_states
         self.total_dim = total_dim
         self.debug = debug
@@ -219,7 +219,7 @@ class GVI:
         est_list = []
         stamp_list = []
         for x_k in self.factored_states:
-            x_k:FactoredMLGState
+            x_k:FactoredState
             
             state_k = x_k.get_mean()
             covar = x_k.get_covariance()

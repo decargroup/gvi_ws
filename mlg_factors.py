@@ -8,8 +8,8 @@ from navlie.types import ProcessModel, Measurement, Input, StateWithCovariance
 from util.psd import force_PSD, force_sym
 from abc import abstractmethod
 
-class FactoredMLGState:
-    def __init__(self,mean:State, covariance:np.ndarray, proj_matrix:np.ndarray, stamp:float, cubature_type='GH', gh_degree = 3):
+class FactoredState:
+    def __init__(self,mean:State, covariance:np.ndarray, proj_matrix:np.ndarray, stamp:float, related_factor: Optional['FactoredState'] = None,cubature_type='GH', gh_degree = 3):
         self.mean = mean.copy()
         # self.mean.value = np.copy(mean.value).astype(np.float64)
         if isinstance(mean, MatrixLieGroupState):
@@ -17,21 +17,33 @@ class FactoredMLGState:
         else:
             self.group = None
         self.covariance:np.ndarray = np.copy(covariance).astype(np.float64)
-        self.total_covariance = np.copy(self.covariance)
         self.sqrt_covariance:np.ndarray = np.linalg.cholesky(covariance)
-        
         self.information:np.ndarray = force_PSD(scipy.linalg.inv(covariance))
-        self.total_information = np.copy(self.information)
         self.projection = np.copy(proj_matrix)
-        self.total_projection = np.copy(proj_matrix)
         self.stamp = stamp
         self.dof = self.mean.dof
-        self.total_dof = self.mean.dof
         self.expect_scalar:np.ndarray = None
         self.expect_column:np.ndarray = None
         self.expect_matrix:np.ndarray = None
-        self.sigma_pts:List[MatrixLieGroupState] = None
+        self.sigma_pts:List[State] = []
 
+        # Handle Related Factor
+        self.related_factor = related_factor
+        if related_factor is not None:
+            self.total_dof = self.dof + related_factor.dof
+            # TODO: Should this be a zero block at initiation?
+            zero_block = np.zeros((self.related_factor.dof, self.dof))
+            self.total_covariance = np.block([
+                [related_factor.covariance, zero_block],
+                [zero_block.T, self.covariance]])
+            self.total_information = force_PSD(scipy.linalg.inv(self.total_covariance))
+            self.total_projection = np.vstack((related_factor.projection, self.projection))
+        else:
+            self.total_dof = self.dof
+            self.total_covariance = self.covariance
+            self.total_information = self.information
+            self.total_projection = self.projection
+            
         # Cubature Method, and Unit Sigma Points
         self.generate_unit_sigma_pts(cubature_type=cubature_type, order=gh_degree)
         self.generate_new_sigma_pts()
@@ -51,25 +63,32 @@ class FactoredMLGState:
 
 
     def generate_new_sigma_pts(self):
-        self.sqrt_covariance = np.linalg.cholesky(self.covariance)
-        # Now Sigma Points will be on Lie Group
-        # So will also be list of MatrixLieGroup
-        self.sigma_pts = [self.mean.plus(self.sqrt_covariance @ sp_i.reshape((-1,1)))
-                           for sp_i in self._unit_sigma_pts]
+        self.sqrt_covariance = np.linalg.cholesky(self.total_covariance)
+        vector_sigma_points = [self.sqrt_covariance @ sp_i.reshape((-1,1)) for sp_i in self._unit_sigma_pts]
+        if self.related_factor is not None:
+            self.sigma_pts = []
+            for sp_vec in vector_sigma_points:
+                sp_vec_prev = sp_vec[0:self.related_factor.dof]
+                sp_vec_cur = sp_vec[self.dof:]
+                sp_lie_prev = self.related_factor.mean.plus(sp_vec_prev)
+                sp_lie_cur = self.mean.plus(sp_vec_cur)
+                self.sigma_pts.append((sp_lie_prev, sp_lie_cur))
+        else:
+            self.sigma_pts = [self.mean.plus(sp_vec) for sp_vec in vector_sigma_points]
         return
     
     def phi_dx(self):
-        return self.information @ self.expect_column
+        return self.total_information @ self.expect_column
 
     def phi_dx_dx(self):
-        a = self.information @ self.expect_matrix @ self.information
-        b = self.information * self.expect_scalar
+        a = self.total_information @ self.expect_matrix @ self.total_information
+        b = self.total_information * self.expect_scalar
         return a - b
     
     def phi_dinfo(self):
         a = -0.5 * self.expect_matrix
-        b = 0.5 * self.covariance * self.expect_scalar
-        c = 0.5 * self.covariance
+        b = 0.5 * self.total_covariance * self.expect_scalar
+        c = 0.5 * self.total_covariance
         # c = np.zeros_like(self.covariance)
         return a + b + c
     
@@ -90,7 +109,7 @@ class FactoredMLGState:
         return
     
     @abstractmethod
-    def eval_phi(self, sigma_point:MatrixLieGroupState) -> np.ndarray:
+    def eval_phi(self, sigma_point:State) -> np.ndarray:
         pass
 
     @abstractmethod
@@ -140,69 +159,20 @@ class FactoredMLGState:
             return self.mean.value.reshape((self.dof, 1)).copy()
         
 
-class ProcessFactor(FactoredMLGState):
-    def __init__(self, mean:State, covariance:np.ndarray, proj_matrix:np.ndarray, related_factor:FactoredMLGState, process_model:ProcessModel, u:Input, stamp, cubature_type='GH', gh_degree=3):
-        # State level fields
-        self.mean = mean.copy()
-        # self.mean.value = np.copy(mean.value).astype(np.float64)
-        if isinstance(mean, MatrixLieGroupState):
-            self.group = mean.group
-        else:
-            self.group = None
-
-        self.covariance:np.ndarray = np.copy(covariance).astype(np.float64)
-        self.information:np.ndarray = force_PSD(scipy.linalg.inv(covariance))
-        self.total_information = np.copy(self.information)
-        self.projection = np.copy(proj_matrix)
-        self.stamp = stamp
-        self.dof = self.mean.dof
-        self.expect_scalar:np.ndarray = None
-        self.expect_column:np.ndarray = None
-        self.expect_matrix:np.ndarray = None
-        # sigma points have (related factor pts, cur factor pts)
-        self.sigma_pts:List[Tuple[State]] = None
-        
-        # Factor level fields, with total values dependent on the related factor.
-        self.related_factor = related_factor
-        self.total_dof = self.dof + self.related_factor.dof
+class ProcessFactor(FactoredState):
+    def __init__(self, mean:State, covariance:np.ndarray, proj_matrix:np.ndarray, related_factor:FactoredState, process_model:ProcessModel, u:Input, stamp, cubature_type='GH', gh_degree=3):
+        super().__init__(mean, covariance, proj_matrix, stamp, related_factor=related_factor, cubature_type=cubature_type, gh_degree=gh_degree)
+        self.sigma_pts:List[Tuple[State]]
+        # Set process specifics
         self.process_model = process_model
         self.u = u
         self.dt = self.stamp - self.u.stamp
         self._Q = self.process_model.covariance(self.mean, self.u, self.dt)
         self._Q_inv = force_PSD(scipy.linalg.inv(self._Q))
         
-        # Combine Covariance and Information sizing
-        zero_block = np.zeros((self.related_factor.dof, self.dof))
-        self.total_covariance = np.block([[self.related_factor.covariance, zero_block], [zero_block.T, self.covariance]])
-        self.total_information = force_PSD(scipy.linalg.inv(self.total_covariance))
-        self.total_projection = np.vstack((self.related_factor.projection, self.projection))
-
-        # Cubature Method, and Unit Sigma Points
-        self.generate_unit_sigma_pts(cubature_type=cubature_type, order=gh_degree)
-        self.generate_new_sigma_pts()
-        # Compute expectations using the Sigma Points
+        # Compute initial expectations using the Sigma Points
         self.compute_expectations()
         return
-    
-    def generate_new_sigma_pts(self):
-        self.sqrt_covariance = np.linalg.cholesky(self.total_covariance)
-        vector_sigma_points = [self.sqrt_covariance @ sp_i.reshape((-1,1)) for sp_i in self._unit_sigma_pts]
-        self.sigma_pts = []
-        for sp_vec in vector_sigma_points:
-            sp_vec_prev = sp_vec[0:self.related_factor.dof]
-            sp_vec_cur = sp_vec[self.dof:]
-            sp_lie_prev = self.related_factor.mean.plus(sp_vec_prev)
-            sp_lie_cur = self.mean.plus(sp_vec_cur)
-            self.sigma_pts.append((sp_lie_prev, sp_lie_cur))
-
-    
-    def phi_dx(self):
-        return self.total_information @ self.expect_column
-
-    def phi_dx_dx(self):
-        a = self.total_information @ self.expect_matrix @ self.total_information
-        b = self.total_information * self.expect_scalar
-        return a - b
     
     def eval_phi(self, cur_sigma_point:State, prev_sigma_point:State):
         propagated = self.process_model.evaluate(prev_sigma_point, self.u, self.dt)
@@ -247,9 +217,9 @@ class ProcessFactor(FactoredMLGState):
         return self.total_information[0:self.related_factor.dof, self.dof:]
         
     
-class PriorFactor(FactoredMLGState):
+class PriorFactor(FactoredState):
     def __init__(self, mean, covariance, proj_matrix, prior:StateWithCovariance, stamp, cubature_type='GH', gh_degree=3):
-        super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree)  
+        super().__init__(mean, covariance, proj_matrix, stamp, cubature_type=cubature_type, gh_degree=gh_degree)  
         # Setup prior terms
         self.x0_check = prior.state.copy()
         self.x0_check.value = np.copy(prior.state.value)
@@ -268,9 +238,9 @@ class PriorFactor(FactoredMLGState):
         return super().update_state(total_mean, total_information, total_covariance)
     
     
-class MeasurementFactor(FactoredMLGState):
-    def __init__(self, mean, covariance, proj_matrix, meas:Measurement, stamp, cubature_type='GH', gh_degree=3):
-        super().__init__(mean, covariance, proj_matrix, stamp, cubature_type, gh_degree) 
+class MeasurementFactor(FactoredState):
+    def __init__(self, mean, covariance, proj_matrix, meas:Measurement, stamp, related_factor: Optional['FactoredState']=None,cubature_type='GH', gh_degree=3):
+        super().__init__(mean, covariance, proj_matrix, stamp, related_factor, cubature_type, gh_degree) 
         self.y_k = np.copy(meas.value)
         self.meas_model = meas.model
         self.R_k = np.atleast_2d(meas.model.covariance(self.mean))
@@ -329,7 +299,7 @@ def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_d
         # TODO: Fix assumption that measurement is synchronized with inputs
         if meas.stamp<=input_data[-1].stamp:
             x_k_idx = factored_stamp_list.index(meas.stamp)
-            x_k:FactoredMLGState = factored_state_list[x_k_idx]
+            x_k:FactoredState = factored_state_list[x_k_idx]
             proj_k = np.copy(x_k.projection)
             
             meas_factor = MeasurementFactor(mean=x_k.get_mean(),

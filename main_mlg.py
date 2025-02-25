@@ -197,13 +197,13 @@ if __name__== '__main__':
     plt.tight_layout()
     plt.show()
     # plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/nees.pdf')
-
+    
     ##########################
     ##### PRINT RESULTS ######
     ##########################
 
-    print(" Method |    Mean Pos Error     |  Mean Vel Error")
-    print("-----------------------------------------------  ")
-    print(f" ESGVI  | {np.mean(results_gvi.error[:,0])}  | {np.mean(results_gvi.error[:,1])}")
+    print(" Method |  Mean Pos Error         | Mean Vel Error")
+    print("--------------------------------------------------- ")
+    print(f" ESGVI  | {np.mean(results_gvi.error[:,0])}   | {np.mean(results_gvi.error[:,1])}")
     print(f" MAP    | {np.mean(results_map.error[:,0])} | {np.mean(results_map.error[:,1])}")
 # %%
