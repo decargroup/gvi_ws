@@ -41,6 +41,7 @@ Thumbs.db
 __pycache__
 __pycache__/
 *.pyc
+util/__pycache__
 ####
 
 # Bash Scripts
