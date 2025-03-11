@@ -26,6 +26,8 @@ class GVI:
         self.init_alpha = init_alpha
         # Initialize mean and information
         self.mean = np.zeros((total_dim, 1), dtype=np.float64)
+        # if factored_states[0].group is not None:
+        #     self.mean = np.zeros((total_dim, factored_states[0].mean.value.shape[1]), dtype=np.float64)
         self.information = np.zeros((total_dim, total_dim), dtype=np.float64)
         self.covariance = np.zeros((total_dim, total_dim), dtype=np.float64)
         self.cur_cost = np.inf
@@ -59,7 +61,7 @@ class GVI:
         # Update states accordingly
         phi = np.zeros((1,1))
         for x_k in self.factored_states:
-            x_k.update_factor(total_mean=self.mean, total_information=self.information, total_covariance=self.covariance)
+            x_k.update_factor(total_mean=self.mean, total_information=self.information, total_covariance=self.covariance, delta_mean=np.zeros_like(self.mean))
             phi += x_k.expect_scalar
         self.cur_cost = phi + (0.5 * np.linalg.slogdet(self.information)[1])
 
@@ -91,8 +93,8 @@ class GVI:
             # self.new_covariance = force_PSD(self.compute_covariance(L, D))
             
             # Compute Covariance
-            self.new_covariance = force_PSD(scipy.linalg.inv(self.new_information))
-            # self.new_covariance = force_PSD(scipy.linalg.pinv(self.new_information + 1e-6 * np.eye(self.new_information.shape[0])))
+            # self.new_covariance = force_PSD(scipy.linalg.inv(self.new_information))
+            self.new_covariance = force_PSD(scipy.linalg.pinv(self.new_information))
 
             # Solve for mean update step
             # This has been a bit stabler
@@ -106,13 +108,15 @@ class GVI:
                     
             # Calculate breaking condition
             size_mu = np.linalg.norm(delta_mu)
-            size_info = np.abs(np.linalg.slogdet(delta_info)[1])
-        
+            # size_info = np.abs(np.linalg.slogdet(delta_info)[1])
+            sqrt_c2 = scipy.linalg.sqrtm(self.new_covariance)
+            # Maybe use this for delta info somehow?
+            size_info = np.sqrt(np.trace(self.covariance + self.new_covariance - 2*scipy.linalg.sqrtm(sqrt_c2 @ self.covariance @ sqrt_c2)))
             # Update factors with new mean, covariance, and info
             self.new_phi = 0.0
             for x_k in self.factored_states:
                 # Update factor recomputes expectations as well
-                x_k.update_factor(total_mean=np.copy(self.new_mean), total_information=np.copy(self.new_information), total_covariance=np.copy(self.new_covariance))
+                x_k.update_factor(total_mean=np.copy(self.new_mean), total_information=np.copy(self.new_information), total_covariance=np.copy(self.new_covariance), delta_mean=np.copy(delta_mu))
                 # Update new phi, for new cost
                 self.new_phi += x_k.expect_scalar
             # Compute cost at this update
@@ -138,7 +142,7 @@ class GVI:
                     x_k.update_factor(total_mean=self.mean, total_information=self.information, total_covariance=self.covariance)
                 break
 
-            if n_iters >= 5:
+            if n_iters >= self.max_iters:
                 print(f"Reached max iterations")
                 print("|Info|: ", size_info)
                 print("|mu|: ", size_mu)
@@ -148,7 +152,7 @@ class GVI:
             if self.new_cost >= self.cur_cost:
                 if self.backtrack_on:
                     print(f"Starting backtracking as {self.new_cost} > {self.cur_cost}")
-                    backtrack_success = self.backtrack(delta_mu, delta_info, max_iters=300, alpha=self.init_alpha)
+                    backtrack_success = self.backtrack(np.copy(delta_mu), np.copy(delta_info), max_iters=300, alpha=self.init_alpha)
                     if not backtrack_success:
                         print(f"Backtracking failed to return a suitable step size")
                         print("Exiting...")
@@ -163,9 +167,10 @@ class GVI:
 
             
             # Update for next iteration
+            # self.mean, self.information, self.covariance = self.update_global_vars()
             self.information = np.copy(self.new_information)
-            self.covariance = np.copy(self.new_covariance)
-            self.mean = np.copy(self.new_mean)
+            self.new_covariance = np.copy(self.new_covariance)
+            self.mean, _, _ = self.update_global_vars()
             self.cur_cost = np.copy(self.new_cost)
             
             if self.debug:
@@ -185,7 +190,7 @@ class GVI:
             proposed_mean = self.mean + (alpha*delta_mu)
             temp_phi = 0.0
             for x_k in self.factored_states:
-                x_k.update_factor(total_mean=proposed_mean, total_information=proposed_info, total_covariance=proposed_covar)
+                x_k.update_factor(total_mean=proposed_mean, total_information=proposed_info, total_covariance=proposed_covar, delta_mean=alpha*delta_mu)
                 temp_phi += x_k.expect_scalar
 
             self.new_cost = temp_phi + (0.5 * np.linalg.slogdet(proposed_info)[1])
@@ -203,7 +208,7 @@ class GVI:
             alpha *= 0.85
             backtrack_iters += 1
             
-            if backtrack_iters >= max_iters or alpha <= 1e-7:
+            if backtrack_iters >= max_iters or alpha <= 1e-9:
                 # Backtrack Failed, Convergence?
                 # Reupdate states with original values
                 for x_k in self.factored_states:
@@ -265,7 +270,32 @@ class GVI:
             phi += x_k.expect_scalar
         self.cur_cost = phi + (0.5 * np.linalg.slogdet(self.information)[1])
 
-    
+    def update_global_vars(self):
+        k = 0
+        new_mean = np.zeros_like(self.mean)
+        new_covar = np.zeros_like(self.covariance)
+        new_info = np.zeros_like(self.information)
+
+        for x_k in self.factored_states:
+
+            if isinstance(x_k, PriorFactor):
+                new_mean[k:k+x_k.dof] = x_k.get_mean_vector()
+                new_info[k:k+x_k.dof, k:k+x_k.dof] = x_k.get_information()
+                new_covar[k:k+x_k.dof, k:k+x_k.dof] = x_k.get_covariance()
+                k+= x_k.dof
+            
+            if isinstance(x_k, ProcessFactor):
+                dof = x_k.dof
+                new_mean[k:k+dof] = x_k.get_mean_vector()
+                new_info[k:k+dof, k:k+dof] = x_k.get_information()
+                new_info[k-dof:k, k:k+dof] = x_k.get_cross_information()
+                new_info[k:k+dof, k-dof:k] = x_k.get_cross_information().T
+                new_covar[k:k+dof, k:k+dof] = x_k.get_covariance()
+                new_covar[k-dof:k, k:k+dof] = x_k.get_cross_covariance()
+                new_covar[k:k+dof, k-dof:k] = x_k.get_cross_covariance().T
+                k += dof
+        return new_mean, new_info, new_covar
+
     def _force_sparsity(self, info_matrix:np.ndarray, deg:int):
         sparse_matrix = np.triu(np.tril(info_matrix.copy(), k=(2*deg-1)), k=-(2*deg-1))
         return sparse_matrix

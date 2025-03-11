@@ -54,7 +54,7 @@ def isPD(B:np.ndarray) -> bool:
     except la.LinAlgError:
         return False
     
-def regularize(A: np.ndarray, cond_threshold=1e10, eps_min=1e-6, eps_max=1e0) -> np.ndarray:
+def regularize(A: np.ndarray, cond_threshold=1e6, eps_min=1e-6, eps_max=1e2) -> np.ndarray:
     """ Regularize matrix by adaptively adjusting the diagonal perturbation. """
     cond_number = np.linalg.cond(A)
     if cond_number > cond_threshold or not np.isfinite(cond_number):
