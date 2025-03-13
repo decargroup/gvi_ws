@@ -19,8 +19,8 @@ from util.map_batch import construct_planar_map
 
 
 if __name__=="__main__":
-    np.random.seed(2)
-    T_END = 0.4
+    np.random.seed(1)
+    T_END = 2.0
     TIME_IT = False
     NOISE = True
     MAP_INIT = False
@@ -33,15 +33,15 @@ if __name__=="__main__":
 
     
     # Landmark Setup Generation
-    landmark_positions = [[2,1]]
+    landmark_positions = [[2,1], [0,1]]
     landmark_states = [VectorState(landmark, state_id=f"{LANDMARK_KEY_STR}{i}") for i, landmark in enumerate(landmark_positions)]
 
     # Meas Model
-    R_d = np.identity(2) * 1e-1
-    meas_models_gen = [PointRelativePosition(landmark_position=np.array([l.value]), R=R_d, landmark_id='l0') for l in landmark_states]
+    # R_d = np.identity(2) * 1e-1
+    # meas_models_gen = [PointRelativePosition(landmark_position=np.array([l.value]), R=R_d, landmark_id='l0') for l in landmark_states]
 
-    # R_d = np.identity(1) * 1e-1
-    # meas_models_gen = [RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states]
+    R_d = np.identity(1) * 1e-1
+    meas_models_gen = [RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states]
     meas_model_freq = 10
 
     # Process Model

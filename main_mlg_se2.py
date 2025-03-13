@@ -20,31 +20,36 @@ from util.map_batch import construct_planar_map
 
 if __name__=="__main__":
     np.random.seed(1)
-    T_END = 1.0
-    TIME_IT = False
+    T_END = 2.0
+    TIME_IT = True
     NOISE = True
+    SLAM = False
     MAP_INIT = False
     BACKTRACK = True
-    INIT_ALPHA = 1e-8
+    INIT_ALPHA = 1e-3
     CUB_METHOD = 'GH' # 'spherical' # 
     GH_DEG = 3
-    GVI_MAX_ITERS = 5
+    GVI_MAX_ITERS = 10
     POSE_KEY_STR = 'x'
     LANDMARK_KEY_STR = 'l'
     DIR = 'right'
 
     
     # Landmark Setup Generation
-    landmark_positions = [[2,1], [1,0]]
+    landmark_positions = [[2,1], [0,1]]
     landmark_states = [VectorState(landmark, state_id=f"{LANDMARK_KEY_STR}{i}") for i, landmark in enumerate(landmark_positions)]
 
     # Meas Model
-    R_d = np.identity(2) * 1e-1
-    meas_models_gen = [PointRelativePosition(landmark_position=np.array([l.value]), R=R_d, landmark_id='l0') for l in landmark_states]
+    # R_d = np.identity(2) * 1e-1
+    # meas_models_gen = [PointRelativePosition(landmark_position=np.array([l.value]), R=R_d, landmark_id='l0') for l in landmark_states]
 
-    # R_d = np.identity(1) * 1e-1
-    # meas_models_gen = [RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states]
+    R_d = np.identity(1) * 1e-1
+    meas_models_gen = [RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states]
     meas_model_freq = 10
+
+    if SLAM:
+        R_d = np.identity(2) * 1e-1
+        meas_models_gen = [PointRelativePosition(landmark_position=np.array([l.value]), R=R_d, landmark_id='l0') for l in landmark_states]
 
     # Process Model
     Q_d = np.identity(3) * 0.2
@@ -80,7 +85,8 @@ if __name__=="__main__":
 
     # MAP Computation
     print('Starting MAP Estimation')
-    problem, init_pose_est = construct_planar_map(x0=x0_state.copy(), P0=np.copy(P0), input_data=input_data_lim, process_model=process_model, meas_data=meas_data_lim)
+    problem, init_pose_est = construct_planar_map(x0=x0_state.copy(), P0=np.copy(P0), input_data=input_data_lim, process_model=process_model, meas_data=meas_data_lim, slam=SLAM)
+
     if TIME_IT:
         timer = timeit.default_timer
         start_time_map = timer()
@@ -115,9 +121,10 @@ if __name__=="__main__":
     # GVI Initialization
     if MAP_INIT:
         factored_state_list = factor_list_from_map(opt_variables=variables_opt, problem=problem, input_data=input_data_lim, meas_data=meas_data_lim, proc_model=process_model, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
-        GVI_MAX_ITERS = 2
+        INIT_ALPHA = 1e-8
+        
     else:
-        factored_state_list = construct_factor_list(x0=x0, input_data=input_data_lim, proc_model=process_model, meas_data=meas_data_lim, cubature_type=CUB_METHOD, gh_deg=GH_DEG, direction=None)
+        factored_state_list = construct_factor_list(x0=x0, input_data=input_data_lim, proc_model=process_model, meas_data=meas_data_lim, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
 
     gvi = GVI(factored_states = factored_state_list, total_dim = state_dof*len(input_data_lim), backtrack_on = BACKTRACK, debug = True, init_alpha=INIT_ALPHA, max_iters=GVI_MAX_ITERS)
     if MAP_INIT:
@@ -137,7 +144,7 @@ if __name__=="__main__":
     #####################
     #### Process GVI ####
     #####################
-    
+    # %%
     estimate_list_gvi = gvi.get_estimate_list()
     pose_list_gvi = [x.state for x in estimate_list_gvi]
     estimate_stamps = [float(x.stamp) for x in estimate_list_gvi]
@@ -174,7 +181,7 @@ if __name__=="__main__":
     ax[1].legend()
     ax[2].legend()
     plt.tight_layout()
-    # plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_3sigma.pdf')
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_3sigma.pdf')
 
     # Poses Plot
     fig, ax = nav.plot_poses(poses=pose_list_map, step=100, label='MAP')
@@ -187,7 +194,7 @@ if __name__=="__main__":
     ax.set_ylabel("y")
     ax.legend()
     plt.tight_layout()
-    # plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_traj.pdf')
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_traj.pdf')
     plt.show()
 
     # Plot NEES
@@ -195,7 +202,7 @@ if __name__=="__main__":
     fig, axs = nav.plot_nees(results_gvi, ax=axs, label='ESGVI', confidence_interval=0.997)
     axs.set_xlabel("Time (s)")
     axs.set_title("NEES")
-    # plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_NEES.pdf')
+    plt.savefig(f'/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_NEES.pdf')
 
     # Comparison table
     print("Average Error: ")
