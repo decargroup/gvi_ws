@@ -76,6 +76,10 @@ if __name__=="__main__":
     meas_freq_list=[meas_model_freq] * len(meas_models_gen))
     gt_poses, input_data, meas_data = dg.generate(x0_state.copy(), start=0.0, stop=T_END, noise=NOISE)
 
+    if NOISE:
+        x0_state = x0_state.plus(nav.randvec(P0))
+        x0 = StateWithCovariance(state=x0_state.copy(), covariance=np.copy(P0))
+
     input_data_lim = input_data[:]
     meas_data_lim = meas_data[:]
     gt_data_lim = gt_poses[:]
@@ -141,10 +145,10 @@ if __name__=="__main__":
     else:
         gvi.solve()
 
+    # %%
     #####################
     #### Process GVI ####
     #####################
-    # %%
     estimate_list_gvi = gvi.get_estimate_list()
     pose_list_gvi = [x.state for x in estimate_list_gvi]
     estimate_stamps = [float(x.stamp) for x in estimate_list_gvi]
@@ -162,6 +166,7 @@ if __name__=="__main__":
     results_map = nav.GaussianResultList.from_estimates(est_list_map, gt_list)
     results_gvi = nav.GaussianResultList.from_estimates(est_list_gvi, gt_list)
 
+    # %%
     #####################
     ##### PLOT GVI ######
     #####################

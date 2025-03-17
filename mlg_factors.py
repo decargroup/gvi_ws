@@ -299,6 +299,11 @@ class PriorFactor(FactoredState):
         # Doesn't have any dependence on another factor, so can just update the individual state
         return super().update_state(total_mean, total_information, total_covariance, delta_mean)
     
+class LandmarkPriorFactor(PriorFactor):
+    def __init__(self, mean:State, covariance:np.ndarray, proj_matrix:np.ndarray, prior:StateWithCovariance, stamp, cubature_type='GH', gh_degree=3):
+        super().__init__(mean, covariance, proj_matrix, prior, stamp, cubature_type, gh_degree)
+
+    
     
 class MeasurementFactor(FactoredState):
     def __init__(self, mean, covariance, proj_matrix, meas:Measurement, stamp, related_factor: Optional['FactoredState']=None,cubature_type='GH', gh_degree=3):
@@ -343,7 +348,7 @@ class MeasurementSLAMFactor(MeasurementFactor):
             expect_phi += w * phi_k_l
             landmark_diff = landmark_sp.minus(self.related_factor.mean).reshape((-1,1))
             cur_diff = cur_sp.minus(self.mean).reshape((-1,1))
-            diff = np.vstack(landmark_diff, cur_diff)
+            diff = np.vstack((landmark_diff, cur_diff))
             expect_mu_phi += w * phi_k_l * diff
             expect_mu_mu_phi += w * phi_k_l * (diff @ diff.T)
 
@@ -363,14 +368,14 @@ class MeasurementSLAMFactor(MeasurementFactor):
             mean_prev = delta_mean[0:self.related_factor.dof]
             mean_cur = delta_mean[self.related_factor.dof:]
             if self.mean.direction == 'left':
-                jac_prev = self.group.left_jacobian(mean_prev)
+                jac_prev = np.eye(self.related_factor.dof)
                 jac_cur = self.group.left_jacobian(mean_cur)  
-                jac_prev_inv = self.group.left_jacobian_inv(mean_prev)
+                jac_prev_inv = np.eye(self.related_factor.dof)
                 jac_cur_inv = self.group.left_jacobian_inv(mean_cur)
             elif self.mean.direction == 'right':
-                jac_prev = self.group.right_jacobian(mean_prev)
+                jac_prev = np.eye(self.related_factor.dof)
                 jac_cur = self.group.right_jacobian(mean_cur)
-                jac_prev_inv = self.group.right_jacobian_inv(mean_prev)
+                jac_prev_inv = np.eye(self.related_factor.dof)
                 jac_cur_inv = self.group.right_jacobian_inv(mean_cur)
                 
             jac = scipy.linalg.block_diag(jac_prev, jac_cur)
@@ -479,7 +484,7 @@ def construct_slam_factor_list(x0:StateWithCovariance, input_data:List[Input], m
         proj_0_landmark = np.zeros((landmark_dof, total_factors_dof))
         idx = state_factors_dof+landmark_idx
         proj_0_landmark[:, idx:idx+landmark_dof] = np.eye(landmark_dof)
-        landmark_factor = PriorFactor(mean=l.state.copy(), covariance=l.covariance, proj_matrix=proj_0_landmark, prior=l.copy(), stamp=None, cubature_type=cubature_type, gh_degree=gh_deg)
+        landmark_factor = LandmarkPriorFactor(mean=l.state.copy(), covariance=l.covariance, proj_matrix=proj_0_landmark, prior=l.copy(), stamp=None, cubature_type=cubature_type, gh_degree=gh_deg)
         factored_landmark_dict[l.state.state_id] = landmark_factor
 
     # Define process prior
@@ -516,15 +521,16 @@ def construct_slam_factor_list(x0:StateWithCovariance, input_data:List[Input], m
             fac_k_idx = factored_stamp_list.index(meas.stamp)
             fac_k:FactoredState = factored_state_list[fac_k_idx]
             proj_k = np.copy(fac_k.projection)
-            landmark_id = meas.model.landmark_id
-            meas.model = meas_model(fac_k.mean.state_id, landmark_id, meas.model.covariance)
+            landmark_id = meas.model._landmark_state_id
+            meas.model = meas_model(fac_k.mean.state_id, landmark_id, meas.model.covariance(None))
             landmark_factor = factored_landmark_dict.get(landmark_id)
             meas_factor = MeasurementSLAMFactor(mean=fac_k.get_mean(),
                                             covariance=fac_k.get_covariance(), proj_matrix=proj_k, meas=meas, stamp=meas.stamp, related_factor=landmark_factor, cubature_type=cubature_type, gh_degree=gh_deg)
             factored_state_list.append(meas_factor)
     
-    factored_state_list.append(factored_landmark_dict.values())
-
+    for landmark in landmark_data:
+        factored_state_list.append(factored_landmark_dict[landmark.state.state_id])
+    
 
     return factored_state_list
 

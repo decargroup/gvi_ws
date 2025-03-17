@@ -143,6 +143,8 @@ class GVI:
                 break
 
             if n_iters >= 5:
+                for x_k in self.factored_states:
+                    x_k.update_factor(total_mean=self.mean, total_information=self.information, total_covariance=self.covariance)
                 print(f"Reached max iterations")
                 print("|Info|: ", size_info)
                 print("|mu|: ", size_mu)
@@ -152,7 +154,7 @@ class GVI:
             if self.new_cost >= self.cur_cost:
                 if self.backtrack_on:
                     print(f"Starting backtracking as {self.new_cost} > {self.cur_cost}")
-                    backtrack_success = self.backtrack(delta_mu, delta_info, max_iters=300, alpha=self.init_alpha)
+                    backtrack_success = self.backtrack(delta_mu, delta_info, max_iters=15, alpha=self.init_alpha)
                     if not backtrack_success:
                         print(f"Backtracking failed to return a suitable step size")
                         print("Exiting...")
@@ -168,7 +170,7 @@ class GVI:
             
             # Update for next iteration
             self.information = np.copy(self.new_information)
-            self.covariance = np.copy(self.new_covariance)
+            self.new_covariance = np.copy(self.new_covariance)
             self.mean = np.copy(self.new_mean)
             self.cur_cost = np.copy(self.new_cost)
             
@@ -204,7 +206,7 @@ class GVI:
                 self.last_alpha = alpha
                 return True
             
-            alpha *= 0.85
+            alpha *= 0.7
             backtrack_iters += 1
             
             if backtrack_iters >= max_iters or alpha <= 1e-7:

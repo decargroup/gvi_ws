@@ -154,7 +154,7 @@ class GVI:
             if self.new_cost >= self.cur_cost:
                 if self.backtrack_on:
                     print(f"Starting backtracking as {self.new_cost} > {self.cur_cost}")
-                    backtrack_success = self.backtrack(np.copy(delta_mu), np.copy(delta_info), max_iters=15, alpha=self.init_alpha)
+                    backtrack_success = self.backtrack(np.copy(delta_mu), np.copy(delta_info), max_iters=5, alpha=self.init_alpha)
                     if not backtrack_success:
                         print(f"Backtracking failed to return a suitable step size")
                         print("Exiting...")
@@ -222,17 +222,24 @@ class GVI:
                 return False
 
     
-    def get_estimate_list(self):
+    def get_estimate_list(self, get_landmark=False):
         est_list = []
+        landmark_est:List[StateWithCovariance] = []
         stamp_list = []
         for x_k in self.factored_states:
             x_k:FactoredState
-            
+
             state_k = x_k.get_mean()
             covar = x_k.get_covariance()
             stamp = x_k.stamp
             est_k = StateWithCovariance(state=state_k, covariance=covar)
-            if stamp not in stamp_list:
+            if get_landmark:
+                if state_k.state_id[0] =='l':
+                    landmark_est.append(est_k)
+                    
+            if stamp is None:
+                pass
+            elif stamp not in stamp_list:
                 est_list.append(est_k)
                 stamp_list.append(stamp)
             else:
@@ -244,6 +251,8 @@ class GVI:
                     print(state_k.value, est_list[idx].state.value)
                     print(covar, "\n", est_list[idx].covariance)
                     raise ValueError("Mean and covariance don't match")
+        if get_landmark:
+            return est_list, landmark_est
         
         return est_list
 
