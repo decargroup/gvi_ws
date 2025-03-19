@@ -300,11 +300,16 @@ class PriorFactor(FactoredState):
         return super().update_state(total_mean, total_information, total_covariance, delta_mean)
     
 class LandmarkPriorFactor(PriorFactor):
-    def __init__(self, mean:State, covariance:np.ndarray, proj_matrix:np.ndarray, prior:StateWithCovariance, stamp, cubature_type='GH', gh_degree=3):
+    def __init__(self, mean:State, covariance:np.ndarray, proj_matrix:np.ndarray, prior:StateWithCovariance, stamp, use_prior=True, cubature_type='GH', gh_degree=3):
+        self.use_prior = use_prior
         super().__init__(mean, covariance, proj_matrix, prior, stamp, cubature_type, gh_degree)
+        
+    def eval_phi(self, sigma_point):
+        if self.use_prior:
+            return super().eval_phi(sigma_point)
+        else:
+            return np.zeros((1,1))
 
-    
-    
 class MeasurementFactor(FactoredState):
     def __init__(self, mean, covariance, proj_matrix, meas:Measurement, stamp, related_factor: Optional['FactoredState']=None,cubature_type='GH', gh_degree=3):
         super().__init__(mean, covariance, proj_matrix, stamp, related_factor, cubature_type, gh_degree) 
@@ -461,7 +466,7 @@ def construct_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_d
 
     return factored_state_list
 
-def construct_slam_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_data:List[Measurement], landmark_data:List[StateWithCovariance],proc_model:ProcessModel, meas_model:MeasurementModel, cubature_type ='GH', gh_deg = 3):
+def construct_slam_factor_list(x0:StateWithCovariance, input_data:List[Input], meas_data:List[Measurement], landmark_data:List[StateWithCovariance],proc_model:ProcessModel, meas_model:MeasurementModel, use_prior=True, cubature_type ='GH', gh_deg = 3):
     factored_state_list = []
     factored_landmark_dict = {}
     factored_stamp_list = []
@@ -484,8 +489,9 @@ def construct_slam_factor_list(x0:StateWithCovariance, input_data:List[Input], m
         proj_0_landmark = np.zeros((landmark_dof, total_factors_dof))
         idx = state_factors_dof+landmark_idx
         proj_0_landmark[:, idx:idx+landmark_dof] = np.eye(landmark_dof)
-        landmark_factor = LandmarkPriorFactor(mean=l.state.copy(), covariance=l.covariance, proj_matrix=proj_0_landmark, prior=l.copy(), stamp=None, cubature_type=cubature_type, gh_degree=gh_deg)
+        landmark_factor = LandmarkPriorFactor(mean=l.state.copy(), covariance=l.covariance, proj_matrix=proj_0_landmark, prior=l.copy(), stamp=None, use_prior=use_prior, cubature_type=cubature_type, gh_degree=gh_deg)
         factored_landmark_dict[l.state.state_id] = landmark_factor
+        landmark_idx += landmark_dof
 
     # Define process prior
     proj_idx = state_dof
@@ -585,5 +591,78 @@ def factor_list_from_map(opt_variables, problem:Problem, input_data:List[nav.typ
     
     return factored_state_list
 
+def slam_factors_from_map(opt_variables, problem:Problem, input_data:List[nav.types.Input], meas_data:List[Measurement], landmark_data:List[VectorState], proc_model:ProcessModel, meas_model:MeasurementModel, use_prior=True, cubature_type ='GH', gh_deg = 3) -> List[FactoredState]:      
+    #TODO: Fix this given landmark states
+    factored_state_list = []
+    factored_stamp_list = []
+    factored_landmark_dict = {}
 
+    # Prior Factors
+    x0_state:State = opt_variables['x0']
+    state_dof = x0_state.dof
+    landmark_dof = landmark_data[0].dof
+    state_factors_dof = len(input_data)*state_dof
+    landmark_factors_dof = len(landmark_data) * landmark_dof
+    total_factors_dof = state_factors_dof + landmark_factors_dof
+    P0 = problem.get_covariance_block(x0_state.state_id, x0_state.state_id)
+
+    proj_0 = np.zeros((state_dof, total_factors_dof))
+    proj_0[:,:state_dof] = np.eye(state_dof)
+
+    prior_factor = PriorFactor(mean=x0_state.copy(), covariance=P0, proj_matrix=proj_0, prior=StateWithCovariance(state=x0_state.copy(), covariance=P0), stamp=x0_state.stamp, cubature_type=cubature_type, gh_degree=gh_deg)
+    factored_state_list.append(prior_factor)
+    factored_stamp_list.append(x0_state.stamp)
+
+    # Landmark Priors
+    landmark_idx = 0
+    for l in landmark_data:
+        proj_0_landmark = np.zeros((landmark_dof, total_factors_dof))
+        idx = state_factors_dof+landmark_idx
+        proj_0_landmark[:, idx:idx+landmark_dof] = np.eye(landmark_dof)
+        l_map:State = opt_variables[l.state_id]
+        l_map_covar:np.ndarray = problem.get_covariance_block(l.state_id, l.state_id)
+        l_state_covar = StateWithCovariance(state=l_map, covariance=l_map_covar)
+        landmark_factor = LandmarkPriorFactor(mean=l_map.copy(), covariance=l_map_covar, proj_matrix=proj_0_landmark, prior=l_state_covar, stamp=None, use_prior=use_prior, cubature_type=cubature_type, gh_degree=gh_deg)
+        # For use later, don't add yet to factor_list
+        factored_landmark_dict[l.state_id] = landmark_factor
+
+
+    # x_k_1 = x0_state.copy()
+    # P_k_1 = np.copy(P0)
+    proj_idx = state_dof
+    # Add Process Factors
+    for i in range(len(input_data)-1):
+        u_k_1:Input = input_data[i]
+        u_k:Input = input_data[i+1]
+        dt_u = u_k.stamp - u_k_1.stamp
+        
+        x_k:State = opt_variables['x'+str(i+1)].copy()
+        P_k = problem.get_covariance_block(x_k.state_id, x_k.state_id)
+        #TODO: Change sizing to account for landmarks
+        proj_k = np.zeros((state_dof, total_factors_dof))
+        proj_k[:, proj_idx:proj_idx+state_dof] = np.eye(state_dof)
+        process_fac_k = ProcessFactor(mean=x_k.copy(), covariance=P_k, proj_matrix=proj_k, related_factor=factored_state_list[-1], process_model=proc_model, u=u_k_1, stamp=x_k.stamp, cubature_type=cubature_type, gh_degree=gh_deg)
+        # TODO: Set cross information values
+        # process_fac_k.set_cross_information(cross_info=problem.get_covariance_block())
+        factored_state_list.append(process_fac_k)
+        factored_stamp_list.append(x_k.stamp)
+        proj_idx += state_dof
+    
+    # Add Measurement Factors
+    for i in range(len(meas_data)):
+        meas:Measurement = meas_data[i]
+        if meas.stamp<=input_data[-1].stamp:
+            x_k_idx = find_nearest_stamp_idx(factored_stamp_list, meas.stamp)
+            x_k:FactoredState = factored_state_list[x_k_idx]
+            proj_k = np.copy(x_k.projection)
+            landmark_id = meas.model._landmark_state_id
+            meas.model = meas_model(x_k.mean.state_id, landmark_id, meas.model.covariance(None))
+            related_landmark = factored_landmark_dict.get(landmark_id)
+            meas_factor = MeasurementSLAMFactor(mean=x_k.get_mean(), covariance=x_k.get_covariance(), proj_matrix=proj_k, stamp=meas.stamp, meas=meas, related_factor=related_landmark, cubature_type=cubature_type, gh_degree=gh_deg)
+            factored_state_list.append(meas_factor)
+
+    for landmark in landmark_data:
+        factored_state_list.append(factored_landmark_dict[landmark.state_id])
+    
+    return factored_state_list
 

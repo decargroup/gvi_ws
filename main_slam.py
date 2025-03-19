@@ -15,28 +15,30 @@ from navlie.lib.models import PointRelativePositionSLAM, PointRelativePosition, 
 from pymlg.numpy.se2 import SE2, SO2
 
 from mlg_gvi import GVI
-from mlg_factors import factor_list_from_map, construct_slam_factor_list
+from mlg_factors import slam_factors_from_map, construct_slam_factor_list
 from util.map_batch import construct_planar_map, extract_landmark_est
 
 if __name__=="__main__":
     np.random.seed(1)
-    T_END = 0.5
+    T_END = 2.0
     TIME_IT = True
     NOISE = True
     MAP_INIT = False
     BACKTRACK = True
-    LANDMARK_PRIOR = True
-    INIT_ALPHA = 1e-3
+    MAP_LANDMARK_PRIOR = False
+    GVI_LANDMARK_PRIOR = False
+    INIT_ALPHA = 1e-2
     CUB_METHOD = 'GH' # 'spherical' # 
-    GH_DEG = 3
+    GH_DEG = 4
     GVI_MAX_ITERS = 10
+    BACKTRACK_ITERS = 5
     POSE_KEY_STR = 'x'
     LANDMARK_KEY_STR = 'l'
     DIR = 'right'
 
     
     # Landmark Setup Generation
-    landmark_positions = [[2,1]]
+    landmark_positions = [[2,1], [0,1]]
     landmark_states = [VectorState(landmark, state_id=f"{LANDMARK_KEY_STR}{i}") for i, landmark in enumerate(landmark_positions)]
 
     # Meas Model
@@ -96,7 +98,7 @@ if __name__=="__main__":
 
     # MAP Computation
     print('Starting MAP Estimation')
-    problem, init_pose_est = construct_planar_map(x0=x0_state.copy(), P0=np.copy(P0), input_data=input_data_lim, process_model=process_model, meas_data=meas_data_lim, slam=True, init_landmark=landmarks_perturb, use_landmark_prior=LANDMARK_PRIOR)
+    problem, init_pose_est = construct_planar_map(x0=x0_state.copy(), P0=np.copy(P0), input_data=input_data_lim, process_model=process_model, meas_data=meas_data_lim, slam=True, init_landmark=landmarks_perturb, use_landmark_prior=MAP_LANDMARK_PRIOR)
 
     if TIME_IT:
         timer = timeit.default_timer
@@ -134,13 +136,14 @@ if __name__=="__main__":
     # %%
     # GVI Initialization
     if MAP_INIT:
-        factored_state_list = factor_list_from_map(opt_variables=variables_opt, problem=problem, input_data=input_data_lim, meas_data=meas_data_lim, proc_model=process_model, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
-        INIT_ALPHA = 1e-8
+        factored_state_list = slam_factors_from_map(opt_variables=variables_opt, problem=problem, input_data=input_data_lim, meas_data=meas_data_lim, landmark_data=landmark_states, proc_model=process_model, meas_model=PointRelativePositionSLAM, use_prior=GVI_LANDMARK_PRIOR, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
+        INIT_ALPHA = 5e-6
+        BACKTRACK_ITERS = 10
         
     else:
-        factored_state_list = construct_slam_factor_list(x0=x0, input_data=input_data_lim, meas_data=meas_data_lim, landmark_data=landmarks_perturb, proc_model=process_model, meas_model=PointRelativePositionSLAM, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
+        factored_state_list = construct_slam_factor_list(x0=x0, input_data=input_data_lim, meas_data=meas_data_lim, landmark_data=landmarks_perturb, proc_model=process_model, meas_model=PointRelativePositionSLAM, use_prior=GVI_LANDMARK_PRIOR, cubature_type=CUB_METHOD, gh_deg=GH_DEG)
     
-    gvi = GVI(factored_states = factored_state_list, total_dim = total_dof, backtrack_on = BACKTRACK, debug = True, init_alpha=INIT_ALPHA, max_iters=GVI_MAX_ITERS)
+    gvi = GVI(factored_states = factored_state_list, total_dim = total_dof, backtrack_on = BACKTRACK, debug = True, init_alpha=INIT_ALPHA, max_iters=GVI_MAX_ITERS, backtrack_iters=BACKTRACK_ITERS)
     if MAP_INIT:
         gvi.from_map(map_covariance=problem.compute_covariance())
 
@@ -203,8 +206,8 @@ if __name__=="__main__":
     fig, ax = nav.plot_poses(poses=gt_data_lim, ax=ax, step=None, label='Ground Truth')
     for l in landmark_states:
         ax.plot(l.value[0], l.value[1], 'x', color='green')
-    fig, ax = nav.utils.plot_landmark_estimates(landmark_est_map, ax = ax, landmark_color='tab:blue',  set_bounds=False, plot_covariance=True)
-    fig, ax = nav.utils.plot_landmark_estimates(landmark_est_gvi, ax = ax, landmark_color='tab:orange',  set_bounds=False, plot_covariance=True)
+    fig, ax = nav.utils.plot_landmark_estimates(landmark_est_map, ax = ax, landmark_color='tab:blue',edge_color='tab:blue', set_bounds=False, plot_covariance=True)
+    fig, ax = nav.utils.plot_landmark_estimates(landmark_est_gvi, ax = ax, landmark_color='tab:orange',edge_color='tab:orange', set_bounds=False, plot_covariance=True)
     ax.set_title("Estimated poses")
     ax.grid(visible=True)
     ax.set_xlabel("x")

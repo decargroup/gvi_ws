@@ -16,13 +16,14 @@ from scipy.linalg import block_diag
 from abc import abstractmethod
 
 class GVI:
-    def __init__(self, factored_states:List[FactoredState], total_dim:int, backtrack_on = True, debug=False, max_iters=10, init_alpha=1.0):
+    def __init__(self, factored_states:List[FactoredState], total_dim:int, backtrack_on = True, debug=False, max_iters=10, backtrack_iters=5, init_alpha=1.0):
         self.factored_states = factored_states
         self.total_dim = total_dim
         self.debug = debug
         self.backtrack_on = backtrack_on
+        self.backtrack_iters = backtrack_iters
         self.max_iters = max_iters
-        self.factor_dof = 0
+        self.factor_dof = factored_states[0].dof
         self.init_alpha = init_alpha
         # Initialize mean and information
         self.mean = np.zeros((total_dim, 1), dtype=np.float64)
@@ -38,7 +39,7 @@ class GVI:
         for x_k in self.factored_states:
             
             if isinstance(x_k, PriorFactor):
-                self.factor_dof = x_k.dof
+                # self.factor_dof = x_k.dof
                 self.mean[k:k+x_k.dof] = x_k.get_mean_vector()
                 self.information[k:k+x_k.dof, k:k+x_k.dof] = x_k.get_information()
                 k+= x_k.dof
@@ -94,7 +95,8 @@ class GVI:
             
             # Compute Covariance
             # self.new_covariance = force_PSD(scipy.linalg.inv(self.new_information))
-            self.new_covariance = force_PSD(scipy.linalg.pinv(self.new_information))
+            self.new_covariance = self._force_sparsity(scipy.linalg.pinv(self.new_information), deg=self.factor_dof)
+            self.new_covariance = force_PSD(self.new_covariance)
 
             # Solve for mean update step
             # This has been a bit stabler
@@ -154,7 +156,7 @@ class GVI:
             if self.new_cost >= self.cur_cost:
                 if self.backtrack_on:
                     print(f"Starting backtracking as {self.new_cost} > {self.cur_cost}")
-                    backtrack_success = self.backtrack(np.copy(delta_mu), np.copy(delta_info), max_iters=5, alpha=self.init_alpha)
+                    backtrack_success = self.backtrack(np.copy(delta_mu), np.copy(delta_info), max_iters=self.backtrack_iters, alpha=self.init_alpha)
                     if not backtrack_success:
                         print(f"Backtracking failed to return a suitable step size")
                         print("Exiting...")
@@ -207,7 +209,7 @@ class GVI:
                 self.last_alpha = alpha
                 return True
             
-            alpha *= 0.7
+            alpha *= 0.95
             backtrack_iters += 1
             
             if backtrack_iters >= max_iters or alpha <= 1e-9:
