@@ -151,7 +151,7 @@ class GVI:
             if self.new_cost >= self.cur_cost:
                 if self.backtrack_on:
                     print(f"Starting backtracking as {self.new_cost} > {self.cur_cost}")
-                    backtrack_success = self.backtrack(delta_mu, delta_info, max_iters=300)
+                    backtrack_success = self.backtrack(delta_mu, delta_info, max_iters=300, alpha=1e-2)
                     if not backtrack_success:
                         print(f"Backtracking failed to return a suitable step size")
                         print("Exiting...")
@@ -175,7 +175,7 @@ class GVI:
                 print(f"Iter: {n_iters} || Cost: {self.cur_cost} || Step size (mu): {size_mu} || Step size (info): {size_info}")
             
     def backtrack(self, delta_mu:np.ndarray, delta_info:np.ndarray, max_iters=10, alpha = 1.0):
-        alpha = 1.0 if self.last_alpha is None else self.last_alpha
+        alpha = alpha if self.last_alpha is None else self.last_alpha
         backtrack_iters = 0
         while(True):
             proposed_info = self.information + (alpha*delta_info)
@@ -203,7 +203,7 @@ class GVI:
                 self.last_alpha = alpha
                 return True
             
-            alpha *= 0.9
+            alpha *= 0.7
             backtrack_iters += 1
             
             if backtrack_iters >= max_iters or alpha <= 1e-8:

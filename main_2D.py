@@ -16,9 +16,9 @@ if __name__== '__main__':
     NOISE_ON = True
     LINEAR = False
     STEREO = True
-    BACKTRACK = False
+    BACKTRACK = True
     TIME_IT = True
-    SIM_TIME = 3
+    SIM_TIME = 5
     CUB_METHOD = 'GH' # 'spherical' # 
     GH_DEG = 3
     # MAX_LEN = 40
