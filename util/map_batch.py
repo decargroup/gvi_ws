@@ -69,7 +69,7 @@ class PointRelativePositionResidual(Residual):
         return error
 
 
-def construct_planar_map(x0:SE2State, P0:np.ndarray, input_data:List[VectorInput], process_model:ProcessModel, meas_data=List[Measurement], pose_key_string='x', compute_covariance=True, slam=False, init_landmark:List[StateWithCovariance]=[], use_landmark_prior = False)-> Problem:
+def construct_planar_map(x0:SE2State, P0:np.ndarray, input_data:List[VectorInput], process_model:ProcessModel, meas_data=List[Measurement], pose_key_string='x', slam=False, init_landmark:List[StateWithCovariance]=[], use_landmark_prior = False)-> Problem:
     x0_hat = x0.copy()
     x0_hat.state_id = pose_key_string + '0'
     init_pose_est = [x0_hat]

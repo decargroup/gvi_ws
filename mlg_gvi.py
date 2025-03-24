@@ -4,7 +4,7 @@ import scipy.linalg
 import navlie as nav
 from typing import Callable, Optional, List
 from util.cubatures import gh_cubature, spherical_cubature
-from mlg_factors import FactoredState, PriorFactor, ProcessFactor, MeasurementFactor
+from mlg_factors import FactoredState, PriorFactor, ProcessFactor, MeasurementFactor, LandmarkPriorFactor
 from models import Simulator, NonLinearLaserRangeFinder, LaserRangeFinder, DoubleIntegrator
 from navlie.datagen import DataGenerator
 from navlie.lib.states import VectorState, VectorInput
@@ -17,6 +17,7 @@ from abc import abstractmethod
 
 class GVI:
     def __init__(self, factored_states:List[FactoredState], total_dim:int, backtrack_on = True, debug=False, max_iters=10, backtrack_iters=5, init_alpha=1.0):
+        # Params
         self.factored_states = factored_states
         self.total_dim = total_dim
         self.debug = debug
@@ -25,17 +26,16 @@ class GVI:
         self.max_iters = max_iters
         self.factor_dof = factored_states[0].dof
         self.init_alpha = init_alpha
+
         # Initialize mean and information
         self.mean = np.zeros((total_dim, 1), dtype=np.float64)
-        # if factored_states[0].group is not None:
-        #     self.mean = np.zeros((total_dim, factored_states[0].mean.value.shape[1]), dtype=np.float64)
         self.information = np.zeros((total_dim, total_dim), dtype=np.float64)
         self.covariance = np.zeros((total_dim, total_dim), dtype=np.float64)
         self.cur_cost = np.inf
         self.last_alpha = None
+
         # Build full mean and information
         k = 0
-        
         for x_k in self.factored_states:
             
             if isinstance(x_k, PriorFactor):
@@ -83,6 +83,10 @@ class GVI:
                 prev_phi += x_k.expect_scalar
                 phi_dx += proj_k.T @ x_k.phi_dx()
                 self.new_information += proj_k.T @ x_k.phi_dx_dx() @ proj_k
+                if isinstance(x_k, LandmarkPriorFactor):
+                    print("Prev Values: ")
+                    print(x_k.covariance)
+                    print(x_k.mean)
                 
             # Force sparsity, PSD, regularize
             self.new_information = self._force_sparsity(self.new_information, deg=self.factor_dof)
@@ -95,7 +99,7 @@ class GVI:
             
             # Compute Covariance
             # self.new_covariance = force_PSD(scipy.linalg.inv(self.new_information))
-            self.new_covariance = self._force_sparsity(scipy.linalg.pinv(self.new_information), deg=self.factor_dof)
+            self.new_covariance = self._force_sparsity(scipy.linalg.inv(self.new_information), deg=self.factor_dof)
             self.new_covariance = force_PSD(self.new_covariance)
 
             # Solve for mean update step
@@ -121,6 +125,11 @@ class GVI:
                 x_k.update_factor(total_mean=np.copy(self.new_mean), total_information=np.copy(self.new_information), total_covariance=np.copy(self.new_covariance), delta_mean=np.copy(delta_mu))
                 # Update new phi, for new cost
                 self.new_phi += x_k.expect_scalar
+                if isinstance(x_k, LandmarkPriorFactor):
+                    print("New State: ")
+                    print(x_k.covariance)
+                    print(x_k.mean)
+
             # Compute cost at this update
             self.new_cost = self.new_phi + (0.5 * np.linalg.slogdet(self.new_information)[1])
             # Convergence Tests
@@ -157,7 +166,9 @@ class GVI:
                 if self.backtrack_on:
                     print(f"Starting backtracking as {self.new_cost} > {self.cur_cost}")
                     backtrack_success = self.backtrack(np.copy(delta_mu), np.copy(delta_info), max_iters=self.backtrack_iters, alpha=self.init_alpha)
-                    if not backtrack_success:
+                    if backtrack_success:
+                        self.mean, self.information, self.covariance = self.update_global_vars()
+                    else:
                         print(f"Backtracking failed to return a suitable step size")
                         print("Exiting...")
                         print(f"Iter: {n_iters} || Cost: {self.cur_cost} || Step size (mu): {size_mu} || Step size (info): {size_info}")
@@ -166,15 +177,21 @@ class GVI:
                     print(f"Exiting, didn't reduce cost from {self.new_cost} to {self.cur_cost}")
                     for x_k in self.factored_states:
                         x_k.update_factor(total_mean=self.mean, total_information=self.information, total_covariance=self.covariance)
+                        if isinstance(x_k, LandmarkPriorFactor):
+                            print("Returning to previous: ")
+                            print(x_k.covariance)
+                            print(x_k.mean)
 
                     return
-
             
             # Update for next iteration
-            # self.mean, self.information, self.covariance = self.update_global_vars()
-            self.information = np.copy(self.new_information)
-            self.new_covariance = np.copy(self.new_covariance)
-            self.mean, _, _ = self.update_global_vars()
+            self.mean = self.new_mean.copy()
+            self.information = self.new_information.copy()
+            self.covariance = self.new_covariance.copy()
+            self.mean, self.information, self.covariance = self.update_global_vars()
+            # self.mean, _, _ = self.update_global_vars()
+            # self.information = np.copy(self.new_information)
+            # self.covariance = np.copy(self.new_covariance)
             self.cur_cost = np.copy(self.new_cost)
             
             if self.debug:
@@ -190,7 +207,7 @@ class GVI:
             proposed_info = regularize(proposed_info)
             # L, D, _ = scipy.linalg.ldl(proposed_info, lower=True)
             # proposed_covar = force_PSD(self.compute_covariance(L,D))
-            proposed_covar = force_PSD(scipy.linalg.pinv(proposed_info))
+            proposed_covar = force_PSD(scipy.linalg.inv(proposed_info))
             proposed_mean = self.mean + (alpha*delta_mu)
             temp_phi = 0.0
             for x_k in self.factored_states:
@@ -220,6 +237,7 @@ class GVI:
                 self.new_covariance = np.copy(self.covariance)
                 self.new_information = np.copy(self.information)
                 self.new_mean = np.copy(self.mean)
+
                 self.new_cost = np.copy(self.cur_cost)
                 return False
 

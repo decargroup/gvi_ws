@@ -19,7 +19,7 @@ if __name__== '__main__':
     BACKTRACK = False
     INIT_ALPHA = 1e-6
     TIME_IT = True
-    SIM_TIME = 6.0
+    SIM_TIME = 2.0
     CUB_METHOD = 'GH' # 'spherical' # 
     GH_DEG = 3
     # MAX_LEN = 40

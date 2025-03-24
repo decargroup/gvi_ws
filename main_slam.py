@@ -15,13 +15,13 @@ from navlie.lib.models import PointRelativePositionSLAM, PointRelativePosition, 
 from pymlg.numpy.se2 import SE2, SO2
 
 from mlg_gvi import GVI
-from mlg_factors import slam_factors_from_map, construct_slam_factor_list
+from mlg_factors import slam_factors_from_map, construct_slam_factor_list, PriorFactor, LandmarkPriorFactor
 from util.map_batch import construct_planar_map, extract_landmark_est
 
 if __name__=="__main__":
     np.random.seed(1)
-    T_END = 2.0
-    TIME_IT = True
+    T_END = 0.03
+    TIME_IT = False
     NOISE = True
     MAP_INIT = False
     BACKTRACK = True
@@ -29,7 +29,7 @@ if __name__=="__main__":
     GVI_LANDMARK_PRIOR = False
     INIT_ALPHA = 1e-2
     CUB_METHOD = 'GH' # 'spherical' # 
-    GH_DEG = 4
+    GH_DEG = 3
     GVI_MAX_ITERS = 10
     BACKTRACK_ITERS = 5
     POSE_KEY_STR = 'x'
@@ -38,7 +38,8 @@ if __name__=="__main__":
 
     
     # Landmark Setup Generation
-    landmark_positions = [[2,1], [0,1]]
+    # landmark_positions = [[2,1], [0,1]]
+    landmark_positions = [[2,1]]
     landmark_states = [VectorState(landmark, state_id=f"{LANDMARK_KEY_STR}{i}") for i, landmark in enumerate(landmark_positions)]
 
     # Meas Model
@@ -51,9 +52,6 @@ if __name__=="__main__":
     process_model = BodyFrameVelocity(Q = Q_d)
     proc_model_freq = 100
 
-    
-    
-
     # Input Profile
     input_profile = lambda t, x: np.array([np.cos(0.1*t), 1.0, 0])
     
@@ -61,11 +59,9 @@ if __name__=="__main__":
     x0_state = SE2State(value=np.array([0,0,0]), stamp=0, state_id=f"{POSE_KEY_STR}{0}", direction=DIR)
     x0_state_gvi = SE2State(value=np.array([0,0,0]), stamp=0, state_id=f"{POSE_KEY_STR}{0}", direction=DIR)
     P0 = np.identity(x0_state.dof) * 1e-3
-    P0_landmark = np.copy(P0[0:2, 0:2])
+    P0_landmark = np.identity(landmark_states[0].dof) * 1e-1
     x0 = StateWithCovariance(state=x0_state_gvi.copy(), covariance=np.copy(P0))
     
-    
-
     
     # Data Generation
     dg = nav.DataGenerator(
@@ -153,10 +149,14 @@ if __name__=="__main__":
     if TIME_IT:
         elapsed_time = timeit.timeit(gvi.solve, number=1)
         print(f"GVI solved in: {elapsed_time:.6f} seconds")
-        print(f"For state size x: {gvi.mean.shape[0]}")
+        print(f"Poses: {(total_state_dof/state_dof):.0f} | Landmarks: {(total_landmark_dof/landmark_dof):.0f}")
+        print(f"Total state size x: {gvi.mean.shape[0]}")
         print(" -------------------------- ")
     else:
         gvi.solve()
+        print(f"Poses: {(total_state_dof/state_dof):.0f} | Landmarks: {(total_landmark_dof/landmark_dof):.0f}")
+        print(f"Total state size x: {gvi.mean.shape[0]}")
+        print(" -------------------------- ")
 
     #####################
     #### Process GVI ####

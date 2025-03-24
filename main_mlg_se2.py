@@ -20,7 +20,7 @@ from util.map_batch import construct_planar_map
 
 if __name__=="__main__":
     np.random.seed(1)
-    T_END = 2.0
+    T_END = 0.5
     TIME_IT = True
     NOISE = True
     SLAM = False
