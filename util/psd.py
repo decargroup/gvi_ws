@@ -46,16 +46,19 @@ def nearestPD(A):
     return A3
 
 
-def isPD(B:np.ndarray) -> bool:
+def isPD(B: np.ndarray) -> bool:
     """Returns true when input is positive-definite, via Cholesky"""
     try:
         _ = la.cholesky(B)
         return True
     except la.LinAlgError:
         return False
-    
-def regularize(A: np.ndarray, cond_threshold=1e5, eps_min=1e-6, eps_max=1e3) -> np.ndarray:
-    """ Regularize matrix by adaptively adjusting the diagonal perturbation. """
+
+
+def regularize(
+    A: np.ndarray, cond_threshold=1e6, eps_min=1e-6, eps_max=1e3
+) -> np.ndarray:
+    """Regularize matrix by adaptively adjusting the diagonal perturbation."""
     cond_number = np.linalg.cond(A)
     if cond_number > cond_threshold or not np.isfinite(cond_number):
         eps = eps_min
@@ -65,28 +68,39 @@ def regularize(A: np.ndarray, cond_threshold=1e5, eps_min=1e-6, eps_max=1e3) -> 
             eps *= 2  # Gradually increase epsilon
         print(f"Regularized condition number {cond_number}, with epsilon = {eps}")
     return A
-    
-def force_PSD(A:np.ndarray) -> np.ndarray:
-    
+
+
+# Force Positive Semi-Definite
+def force_PSD(A: np.ndarray) -> np.ndarray:
+
     # A = regularize(A, cond_threshold=cond_threshold, epsilon=epsilon)
     if not isPD(A):
         return nearestPD(A)
     else:
         return A
-    
+
+
+# Force Symmetry
 def force_sym(A):
     A = (A + A.T) / 2
     return A
+
+
+# Force Symmetric Positive Semi-Definiteness
+def force_sym_PSD(A):
+    A = force_sym(A)
+    return force_PSD(A)
+
 
 # def nearest_PSD(A:np.ndarray, epsilon:float = 1e-8) -> np.ndarray:
 #     A = force_sym(A)
 
 #     # Perform eigendecomposition: Σ = V D V^T
 #     eigvals, eigvecs = np.linalg.eigh(A)  # Eigen decomposition for symmetric matrices
-    
+
 #     # Modify D to D+ (element-wise max with 0)
 #     D_plus = np.diag(np.maximum(eigvals, 0))
-    
+
 #     # Reconstruct Σ+ = V D+ V^T + epsilon * I
 #     while True:
 #         A = eigvecs @ D_plus @ eigvecs.T + epsilon * np.eye(A.shape[0])
@@ -94,5 +108,5 @@ def force_sym(A):
 #             break
 #         else:
 #             epsilon *= 10
-    
+
 #     return A
