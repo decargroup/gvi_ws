@@ -93,6 +93,7 @@ class GVI:
                 self.total_landmark_dim += x_k.dof
                 self.total_states_dim -= x_k.dof
 
+        self.information = self._force_sparsity(self.information)
         self.information = force_sym_PSD(self.information)
 
         # TODO: Fix the sparsity of computing covariance
@@ -127,17 +128,10 @@ class GVI:
                 prev_phi += x_k.expect_scalar
                 phi_dx += proj_k.T @ x_k.phi_dx()
                 self.new_information += proj_k.T @ x_k.phi_dx_dx() @ proj_k
-                if isinstance(x_k, LandmarkPriorFactor):
-                    print("Prev Values: ")
-                    print(x_k.covariance)
-                    print(x_k.mean)
 
             # Force sparsity, PSD, regularize
-            # self.new_information = self._force_sparsity(
-            #     self.new_information, deg=self.state_dof
-            # )
+            self.new_information = self._force_sparsity(self.new_information)
             self.new_information = force_sym_PSD(self.new_information)
-            # self.new_information = force_PSD(self.new_information)
             self.new_information = regularize(self.new_information)
 
             # TODO: Fix sparsity
@@ -145,10 +139,7 @@ class GVI:
             # self.new_covariance = force_PSD(self.compute_covariance(L, D))
 
             # Compute Covariance
-            self.new_covariance = force_sym_PSD(scipy.linalg.inv(self.new_information))
-            # self.new_covariance = self._force_sparsity(
-            #     scipy.linalg.inv(self.new_information), deg=self.state_dof
-            # )
+            self.new_covariance = force_sym_PSD(scipy.linalg.pinv(self.new_information))
             # self.new_covariance = force_sym(self.new_covariance)
             # self.new_covariance = force_PSD(self.new_covariance)
 
@@ -157,10 +148,74 @@ class GVI:
             delta_mu = scipy.linalg.solve(self.new_information, -phi_dx)
             self.new_mean = self.mean + delta_mu
 
+            # Update factors with new mean, covariance, and info
+            self.new_phi = 0.0
+            k = 0
+            for x_k in self.factored_states:
+                # Update factor recomputes expectations as well
+                x_k.update_factor(
+                    total_mean=self.new_mean,
+                    total_information=self.new_information,
+                    total_covariance=self.new_covariance,
+                    delta_mean=delta_mu,
+                )
+                # Update new phi, for new cost
+                self.new_phi += x_k.expect_scalar
+                print(x_k, self.new_phi)
+                # Update the cross covariance terms
+                if isinstance(x_k, PriorFactor):
+                    self.new_mean[k : k + x_k.dof] = x_k.get_mean_vector()
+                    self.new_information[k : k + x_k.dof, k : k + x_k.dof] = (
+                        x_k.get_information()
+                    )
+                    self.new_covariance[k : k + x_k.dof, k : k + x_k.dof] = (
+                        x_k.get_covariance()
+                    )
+                    k += x_k.dof
+                if isinstance(x_k, ProcessFactor):
+                    dof = x_k.dof
+                    self.new_mean[k : k + dof] = x_k.get_mean_vector()
+                    self.new_information[k : k + dof, k : k + dof] = (
+                        x_k.get_information()
+                    )
+                    self.new_information[k - dof : k, k : k + dof] = (
+                        x_k.get_cross_information()
+                    )
+                    self.new_information[k : k + dof, k - dof : k] = (
+                        x_k.get_cross_information().T
+                    )
+                    self.new_covariance[k : k + dof, k : k + dof] = x_k.get_covariance()
+                    self.new_covariance[k - dof : k, k : k + dof] = (
+                        x_k.get_cross_covariance()
+                    )
+                    self.new_covariance[k : k + dof, k - dof : k] = (
+                        x_k.get_cross_covariance().T
+                    )
+                    k += dof
+
+            # Compute cost at this update
+            self.new_cost = self.new_phi + (
+                0.5 * np.linalg.slogdet(self.new_information)[1]
+            )
+
+            # Calculate the new covariance based off of new information
+            # self.new_covariance = force_sym_PSD(scipy.linalg.inv(self.new_information))
+            # for x_k in self.factored_states:
+            #     # Update factor recomputes expectations as well
+            #     x_k.update_factor(
+            #         total_mean=np.copy(self.new_mean),
+            #         total_information=np.copy(self.new_information),
+            #         total_covariance=np.copy(self.new_covariance),
+            #         delta_mean=np.zeros_like(delta_mu),
+            #     )
             # Compute delta_info
             delta_info = self.new_information - self.information
+            delta_info = self._force_sparsity(delta_info)
             # delta_info = regularize(delta_info)
             delta_info = force_sym(delta_info)
+
+            # TODO: Get delta_mean from individual factor level.
+            delta_mu = self.new_mean - self.mean
 
             # Calculate breaking condition
             size_mu = np.linalg.norm(delta_mu)
@@ -172,55 +227,6 @@ class GVI:
                 + self.new_covariance
                 - 2 * scipy.linalg.sqrtm(sqrt_c2 @ self.covariance @ sqrt_c2),
                 "fro",
-            )
-
-            # Update factors with new mean, covariance, and info
-            self.new_phi = 0.0
-            # k = 0
-            for x_k in self.factored_states:
-                # Update factor recomputes expectations as well
-                x_k.update_factor(
-                    total_mean=np.copy(self.new_mean),
-                    total_information=np.copy(self.new_information),
-                    total_covariance=np.copy(self.new_covariance),
-                    delta_mean=np.copy(delta_mu),
-                )
-                # Update new phi, for new cost
-                self.new_phi += x_k.expect_scalar
-                # Update the cross covariance terms
-                # if isinstance(x_k, PriorFactor):
-                #     self.new_mean[k : k + x_k.dof] = x_k.get_mean_vector()
-                #     self.new_information[k : k + x_k.dof, k : k + x_k.dof] = (
-                #         x_k.get_information()
-                #     )
-                #     self.new_covariance[k : k + x_k.dof, k : k + x_k.dof] = (
-                #         x_k.get_covariance()
-                #     )
-                #     k += x_k.dof
-                # if isinstance(x_k, ProcessFactor):
-                #     dof = x_k.dof
-                #     self.new_mean[k : k + dof] = x_k.get_mean_vector()
-                #     self.new_information[k : k + dof, k : k + dof] = (
-                #         x_k.get_information()
-                #     )
-                #     self.new_information[k - dof : k, k : k + dof] = (
-                #         x_k.get_cross_information()
-                #     )
-                #     self.new_information[k : k + dof, k - dof : k] = (
-                #         x_k.get_cross_information().T
-                #     )
-                #     self.new_covariance[k : k + dof, k : k + dof] = x_k.get_covariance()
-                #     self.new_covariance[k - dof : k, k : k + dof] = (
-                #         x_k.get_cross_covariance()
-                #     )
-                #     self.new_covariance[k : k + dof, k - dof : k] = (
-                #         x_k.get_cross_covariance().T
-                #     )
-                #     k += dof
-
-            # Compute cost at this update
-            self.new_cost = self.new_phi + (
-                0.5 * np.linalg.slogdet(self.new_information)[1]
             )
 
             # Convergence Tests
@@ -238,6 +244,7 @@ class GVI:
                         total_mean=self.mean,
                         total_information=self.information,
                         total_covariance=self.covariance,
+                        delta_mean=-1 * delta_mu,
                     )
                 break
 
@@ -253,6 +260,7 @@ class GVI:
                         total_mean=self.mean,
                         total_information=self.information,
                         total_covariance=self.covariance,
+                        delta_mean=-1 * delta_mu,
                     )
                 break
 
@@ -262,6 +270,7 @@ class GVI:
                         total_mean=self.mean,
                         total_information=self.information,
                         total_covariance=self.covariance,
+                        delta_mean=-1 * delta_mu,
                     )
                 print(f"Reached max iterations")
                 print("|Info|: ", size_info)
@@ -297,18 +306,15 @@ class GVI:
                             total_mean=self.mean,
                             total_information=self.information,
                             total_covariance=self.covariance,
+                            delta_mean=None,
                         )
-                        if isinstance(x_k, LandmarkPriorFactor):
-                            print("Returning to previous: ")
-                            print(x_k.covariance)
-                            print(x_k.mean)
 
                     return
 
             # Update for next iteration
             self.mean = self.new_mean.copy()
             self.information = self.new_information.copy()
-            self.new_covariance = self.new_covariance.copy()
+            self.covariance = self.new_covariance.copy()
             self.mean, _, _ = self.update_global_vars()
             # self.mean, _, _ = self.update_global_vars()
             # self.information = np.copy(self.new_information)
@@ -347,9 +353,10 @@ class GVI:
                     total_mean=proposed_mean,
                     total_information=proposed_info,
                     total_covariance=proposed_covar,
-                    delta_mean=None,
+                    delta_mean=alpha * delta_mu,
                 )
                 temp_phi += x_k.expect_scalar
+                print(x_k, temp_phi)
 
             self.new_cost = temp_phi + (0.5 * np.linalg.slogdet(proposed_info)[1])
             if backtrack_iters % 5 == 0:
@@ -480,10 +487,11 @@ class GVI:
                 k += dof
         return new_mean, new_info, new_covar
 
-    def _force_sparsity(self, info_matrix: np.ndarray, deg: int):
+    def _force_sparsity(self, info_matrix: np.ndarray):
         info_matrix_states = info_matrix[
             0 : self.total_states_dim, 0 : self.total_states_dim
         ].copy()
+        deg = self.state_dof
         sparse_matrix = np.triu(
             np.tril(info_matrix_states, k=(2 * deg - 1)), k=-(2 * deg - 1)
         )

@@ -25,7 +25,7 @@ from util.map_batch import construct_planar_map
 
 if __name__ == "__main__":
     np.random.seed(1)
-    T_END = 0.3
+    T_END = 0.03
     TIME_IT = True
     NOISE = True
     SLAM = False
@@ -35,7 +35,7 @@ if __name__ == "__main__":
     CUB_METHOD = "GH"  # 'spherical' #
     GH_DEG = 3
     GVI_MAX_ITERS = 10
-    BACKTRACK_ITERS = 10
+    BACKTRACK_ITERS = 30
     POSE_KEY_STR = "x"
     LANDMARK_KEY_STR = "l"
     DIR = "right"
@@ -168,8 +168,8 @@ if __name__ == "__main__":
             cubature_type=CUB_METHOD,
             gh_deg=GH_DEG,
         )
-        INIT_ALPHA = 1e-7
-        BACKTRACK_ITERS = 100
+        INIT_ALPHA = 1e-8
+        BACKTRACK_ITERS = 20
 
     else:
         factored_state_list = construct_factor_list(
@@ -199,11 +199,12 @@ if __name__ == "__main__":
     if TIME_IT:
         elapsed_time = timeit.timeit(gvi.solve, number=1)
         print(f"GVI solved in: {elapsed_time:.6f} seconds")
-        print(f"For state size x: {gvi.mean.shape[0]}")
-        print(" -------------------------- ")
+
     else:
         gvi.solve()
-
+    print(f"GVI finished state size x: {gvi.mean.shape[0]}")
+    print(f"Poses: {(gvi.total_states_dim/gvi.state_dof):.0f}")
+    print(" -------------------------- ")
     # %%
     #####################
     #### Process GVI ####
@@ -269,9 +270,9 @@ if __name__ == "__main__":
     ax[1].legend()
     ax[2].legend()
     plt.tight_layout()
-    plt.savefig(
-        f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_3sigma.pdf"
-    )
+    # plt.savefig(
+    #     f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_3sigma.pdf"
+    # )
 
     # Poses Plot
     fig, ax = nav.plot_poses(poses=pose_list_map, step=100, label="MAP")
@@ -284,9 +285,9 @@ if __name__ == "__main__":
     ax.set_ylabel("y")
     ax.legend()
     plt.tight_layout()
-    plt.savefig(
-        f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_traj.pdf"
-    )
+    # plt.savefig(
+    #     f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_traj.pdf"
+    # )
     plt.show()
 
     # Plot NEES
@@ -296,9 +297,9 @@ if __name__ == "__main__":
     )
     axs.set_xlabel("Time (s)")
     axs.set_title("NEES")
-    plt.savefig(
-        f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_NEES.pdf"
-    )
+    # plt.savefig(
+    #     f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_NEES.pdf"
+    # )
 
     # Comparison table
     print("Average Error: ")

@@ -582,6 +582,9 @@ class MeasurementSLAMFactor(MeasurementFactor):
             self.total_information = jac.T @ self.total_information @ jac
             self.total_covariance = jac_inv @ self.total_covariance @ jac_inv.T
 
+        self.related_factor.update_factor(
+            total_mean, total_information, total_covariance, delta_mean=delta_mean
+        )
         # Update state
         self.update_state(
             total_mean, total_information, total_covariance, delta_mean=delta_mean
@@ -681,7 +684,7 @@ def construct_factor_list(
             cubature_type=cubature_type,
             gh_degree=gh_deg,
         )
-        proc_factor_k.set_cross_information(P_k_1 @ A_k.T)
+        # proc_factor_k.set_cross_information(P_k_1 @ A_k.T)
         factored_state_list.append(proc_factor_k)
         factored_stamp_list.append(u_k.stamp)
         proj_idx += state_dof
@@ -794,7 +797,7 @@ def construct_slam_factor_list(
             cubature_type=cubature_type,
             gh_degree=gh_deg,
         )
-        proc_factor_k.set_cross_information(P_k_1 @ A_k.T)
+        # proc_factor_k.set_cross_information(P_k_1 @ A_k.T)
         factored_state_list.append(proc_factor_k)
         factored_stamp_list.append(u_k.stamp)
         proj_idx += state_dof
@@ -877,6 +880,7 @@ def factor_list_from_map(
         dt_u = u_k.stamp - u_k_1.stamp
 
         x_k: State = opt_variables["x" + str(i + 1)].copy()
+        x_k_1: State = opt_variables["x" + str(i)].copy()
         P_k = problem.get_covariance_block(x_k.state_id, x_k.state_id)
         # TODO: Change sizing to account for landmarks
         proj_k = np.zeros((state_dof, len(input_data) * state_dof))
@@ -893,7 +897,10 @@ def factor_list_from_map(
             gh_degree=gh_deg,
         )
         # TODO: Set cross information values
-        # process_fac_k.set_cross_information(cross_info=problem.get_covariance_block())
+
+        process_fac_k.set_cross_information(
+            cross_info=problem.get_covariance_block(x_k_1.state_id, x_k.state_id)
+        )
         factored_state_list.append(process_fac_k)
         factored_stamp_list.append(x_k.stamp)
         proj_idx += state_dof
@@ -1009,9 +1016,9 @@ def slam_factors_from_map(
             gh_degree=gh_deg,
         )
         # TODO: Set cross information values
-        process_fac_k.set_cross_information(
-            problem.get_covariance_block(x_k_1.state_id, x_k.state_id)
-        )
+        # process_fac_k.set_cross_information(
+        #     problem.get_covariance_block(x_k_1.state_id, x_k.state_id)
+        # )
         factored_state_list.append(process_fac_k)
         factored_stamp_list.append(x_k.stamp)
         proj_idx += state_dof

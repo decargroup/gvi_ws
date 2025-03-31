@@ -30,7 +30,7 @@ from util.map_batch import construct_planar_map, extract_landmark_est
 
 if __name__ == "__main__":
     np.random.seed(1)
-    T_END = 0.5
+    T_END = 0.03
     TIME_IT = False
     NOISE = True
     MAP_INIT = False
