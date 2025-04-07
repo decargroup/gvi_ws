@@ -92,6 +92,24 @@ def force_sym_PSD(A):
     return force_PSD(A)
 
 
+from scipy.linalg import lapack
+
+
+def upper_triangular_to_symmetric(ut):
+    ut += np.triu(ut, k=1).T
+
+
+def fast_positive_definite_inverse(m):
+    cholesky, info = lapack.dpotrf(m)
+    if info != 0:
+        raise ValueError("dpotrf failed on input {}".format(m))
+    inv, info = lapack.dpotri(cholesky)
+    if info != 0:
+        raise ValueError("dpotri failed on input {}".format(cholesky))
+    upper_triangular_to_symmetric(inv)
+    return inv
+
+
 # def nearest_PSD(A:np.ndarray, epsilon:float = 1e-8) -> np.ndarray:
 #     A = force_sym(A)
 

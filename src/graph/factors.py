@@ -61,7 +61,7 @@ class Factor:
         self.expect_column: np.ndarray = None
         self.expect_matrix: np.ndarray = None
 
-    def _gen_unit_sigma_pts(self):
+    def _gen_unit_sigma_pts(self) -> Tuple[np.ndarray, np.ndarray]:
         return self._cubature_fun(state_dof=self._total_dof, order_p=self._order)
 
     def _phi_dx(self, information: np.ndarray):
@@ -85,11 +85,21 @@ class Factor:
         pass
 
     @abstractmethod
-    def evaluate_derivatives(self) -> Tuple[np.ndarray, np.ndarray]:
+    def evaluate_derivatives(
+        self, states: List[State], covar_matrix: np.ndarray, info_matrix: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Evaluates and returns the global (unprojected) vector and matrix valued derivative expectations, respectively.
+        Returns phi (cost), phi_dx (col vector), and phi_dx_dx (information matrix) associated with specific factor.
         """
         pass
+
+    @abstractmethod
+    def evaluate_factor_cost(
+        self, states: List[State], covar_matrix: np.ndarray, info_matrix: np.ndarray
+    ) -> np.ndarray:
+        """
+        Returns new phi (cost) based upon an updated state list, covariance and inforamtion matrices.
+        """
 
 
 class PriorFactor(Factor):
@@ -149,7 +159,10 @@ class PriorFactor(Factor):
 
     def evaluate_derivatives(
         self, states: List[State], covar_matrix: np.ndarray, info_matrix: np.ndarray
-    ):
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Returns phi (cost), phi_dx (col vector), and phi_dx_dx (information matrix) associated with specific factor.
+        """
         # Get covariance/information at factor level
         factor_covar = covar_matrix[self.state_slices[0], self.state_slices[0]]
         factor_info = info_matrix[self.state_slices[0], self.state_slices[0]]
@@ -180,6 +193,23 @@ class PriorFactor(Factor):
         )
 
         return self.expect_scalar, global_column, global_matrix
+
+    def evaluate_factor_cost(self, states, covar_matrix, info_matrix):
+        # Get covariance/information at factor level
+        factor_covar = covar_matrix[self.state_slices[0], self.state_slices[0]]
+        # Calculate sigma points from this new covariance
+        sigma_points = self._gen_sigma_pts(states, factor_covar)
+
+        expect_phi = np.zeros((1, 1), dtype=np.float64)
+
+        # TODO: Vectorize this
+        for i, w in enumerate(self._weights):
+            phi_k = self._eval_factor(sigma_points[i])
+            expect_phi += w * phi_k
+
+        self.expect_scalar = expect_phi.copy()
+
+        return self.expect_scalar
 
 
 class MeasurementFactor(Factor):
@@ -236,7 +266,7 @@ class MeasurementFactor(Factor):
         # Get covariance/information at factor level
         factor_covar = covar_matrix[self.state_slices[0], self.state_slices[0]]
         factor_info = info_matrix[self.state_slices[0], self.state_slices[0]]
-        # Calculate sigma points from this new covariance
+        # Calculate sigma points from this factors covariance
         sigma_points = self._gen_sigma_pts(states, factor_covar)
         # Get current state
         x = states[0]
@@ -264,6 +294,24 @@ class MeasurementFactor(Factor):
 
         return self.expect_scalar, global_column, global_matrix
 
+    def evaluate_factor_cost(self, states, covar_matrix, info_matrix):
+        # Get covariance/information at factor level
+        factor_covar = covar_matrix[self.state_slices[0], self.state_slices[0]]
+
+        # Calculate sigma points from this new covariance
+        sigma_points = self._gen_sigma_pts(states, factor_covar)
+
+        expect_phi = np.zeros((1, 1), np.float64)
+
+        # TODO: Vectorize this
+        for i, w in enumerate(self._weights):
+            phi_k = self._eval_factor(sigma_points[i])
+            expect_phi += w * phi_k
+
+        self.expect_scalar = expect_phi.copy()
+
+        return self.expect_scalar
+
 
 class ProcessFactor(Factor):
     "General Process Factor"
@@ -288,7 +336,7 @@ class ProcessFactor(Factor):
 
         # Factor size
         self._total_dof = self.projection.shape[0]
-        self._dof = self._total_dof / 2
+        self._dof = int(self._total_dof / 2)
 
         # Generate the unit sigma points
         self._unit_sigma_pts, self._weights = self._gen_unit_sigma_pts()
@@ -303,13 +351,18 @@ class ProcessFactor(Factor):
         """
         if factor_covar.shape[0] != self._total_dof:
             raise ValueError(
-                "Provided factor covariance needs to be joint state covariance."
+                f"Provided factor covariance needs to be ({self._total_dof},{self._total_dof})"
             )
 
         sqrt_covariance = np.linalg.cholesky(factor_covar)
-        vector_sigma_points = [
-            sqrt_covariance @ sp_i.reshape((-1, 1)) for sp_i in self._unit_sigma_pts
-        ]
+        # vector_sigma_points = [
+        #     sqrt_covariance @ sp_i.reshape((-1, 1)) for sp_i in self._unit_sigma_pts
+        # ]
+        vector_sigma_points = []
+        for sp_i in self._unit_sigma_pts:
+            xi_i = sqrt_covariance @ sp_i.reshape((-1, 1))
+            vector_sigma_points.append(xi_i)
+
         x_km1 = states[0]
         x_k = states[1]
         sigma_pts = []
@@ -327,9 +380,8 @@ class ProcessFactor(Factor):
         sp_k = sigma_points[1]
         dt = sp_k.stamp - sp_km1.stamp
         propagated = self._process_model.evaluate(sp_km1, self._input, dt)
-        Q_k_inv = scipy.linalg.inv(
-            self._process_model.covariance(sp_km1, self._input, dt)
-        )
+        Q_k = force_sym_PSD(self._process_model.covariance(sp_km1, self._input, dt))
+        Q_k_inv = scipy.linalg.inv(Q_k)
         process_diff = sp_k.minus(propagated).reshape((-1, 1))
         phi_proc = 0.5 * process_diff.T @ Q_k_inv @ process_diff
         return phi_proc
@@ -385,3 +437,32 @@ class ProcessFactor(Factor):
         )
 
         return self.expect_scalar, global_column, global_matrix
+
+    def evaluate_derivatives(
+        self, states: List[State], covar_matrix: np.ndarray, info_matrix: np.ndarray
+    ):
+        # Get covariance/information at state level
+        x_km1_covar = covar_matrix[self.state_slices[0], self.state_slices[0]]
+
+        x_k_covar = covar_matrix[self.state_slices[1], self.state_slices[1]]
+
+        cross_covar = covar_matrix[self.state_slices[0], self.state_slices[1]]
+
+        # Form factor level covariance and information
+        factor_covar = np.block(
+            [[x_km1_covar, cross_covar], [cross_covar.T, x_k_covar]]
+        )
+
+        # Calculate sigma points from this new covariance
+        sigma_points = self._gen_sigma_pts(states, factor_covar)
+
+        expect_phi = np.zeros((1, 1), dtype=np.float64)
+
+        # TODO: Vectorize this
+        for i, w in enumerate(self._weights):
+            phi_k = self._eval_factor(sigma_points[i])
+            expect_phi += w * phi_k
+
+        self.expect_scalar = expect_phi.copy()
+
+        return self.expect_scalar
