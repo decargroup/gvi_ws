@@ -438,7 +438,7 @@ class ProcessFactor(Factor):
 
         return self.expect_scalar, global_column, global_matrix
 
-    def evaluate_derivatives(
+    def evaluate_factor_cost(
         self, states: List[State], covar_matrix: np.ndarray, info_matrix: np.ndarray
     ):
         # Get covariance/information at state level

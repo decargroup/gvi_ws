@@ -20,7 +20,7 @@ class ESGVI:
         self,
         max_iters: int = 10,
         step_tol: float = 1e-6,
-        backtrack: bool = True,
+        backtrack_on: bool = True,
         backtrack_iters: int = 10,
         init_step_distance: float = 1.0,
         verbose: bool = True,
@@ -44,10 +44,10 @@ class ESGVI:
         self.factor_slices: List[slice] = []
 
         # Size of the problem
-        self._graph_total_dof: int = None
-        self._num_states: int = None
-        self._num_landmarks: int = None
-        self._size_factors: int = None
+        self._graph_total_dof: int = 0
+        self._num_states: int = 0
+        self._num_landmarks: int = 0
+        self._size_factors: int = 0
 
         # Cost values
         self.new_cost: int = None
@@ -60,12 +60,12 @@ class ESGVI:
         self._covariance_matrix: np.ndarray = None
 
         # Backtracking Values
-        self.backtrack = backtrack
+        self.backtrack_on = backtrack_on
         self.backtrack_iters = backtrack_iters
         self.init_step_distance = init_step_distance
         self.last_alpha = None
 
-    def is_converged(self, delta_mean, new_info, new_covar):
+    def is_converged(self, delta_mean, new_info, new_covar, n_iters):
         # TODO: Check if this should cur_cost or prev_cost
         cost = self.prev_cost
         delta_cost = self.new_cost - self.prev_cost
@@ -92,6 +92,10 @@ class ESGVI:
                     converged = True
                     print(f"Coverged with relative cost change of {self.step_tol}.")
 
+        if n_iters >= self.max_iters:
+            converged = True
+            print(f"Reached max iterations of {n_iters}.")
+
         return converged
 
     def add_factor(self, factor: Factor):
@@ -106,8 +110,6 @@ class ESGVI:
 
     def add_state(self, key: Hashable, variable: State):
         """Adds a state to the ESGVI Factor Graph."""
-        if self._graph_total_dof is None:
-            self._graph_total_dof = 0
 
         self.init_states[key] = variable
         self.state_slices[key] = slice(
@@ -128,6 +130,7 @@ class ESGVI:
         """Solves the optimization problem."""
         self.states = {k: v.copy() for k, v in self.init_states.items()}
         self._prev_states = {k: v.copy() for k, v in self.init_states.items()}
+        n_iters = 0
         while True:
             # Calculate New Information, Phi_dx
             new_info = np.zeros_like(self._information_matrix)
@@ -135,8 +138,9 @@ class ESGVI:
             self.prev_cost = 0.5 * np.linalg.slogdet(self._information_matrix)[1]
 
             for factor in self.factor_list:
+                factor_states = [self.states[key] for key in factor.keys]
                 cost_update, phi_dx_update, info_update = factor.evaluate_derivatives(
-                    self.states, self._covariance_matrix, self._information_matrix
+                    factor_states, self._covariance_matrix, self._information_matrix
                 )
                 self.prev_cost += cost_update
                 phi_dx += phi_dx_update
@@ -153,7 +157,7 @@ class ESGVI:
                 self._delta_mean, new_info, new_covar
             )
             self.new_cost = self.calculate_new_cost(new_info, new_covar)
-            if self.is_converged(self._delta_mean, new_info, new_covar):
+            if self.is_converged(self._delta_mean, new_info, new_covar, n_iters):
                 return self.states
 
             if self.new_cost < self.prev_cost:
@@ -173,8 +177,14 @@ class ESGVI:
                     self.cost_history.append(self.new_cost)
                     self.prev_cost = self.new_cost
                 else:
-                    print(f"Backtracking failed...")
+
+                    if self.verbose:
+                        print(f"Backtracking failed...")
+
                     return self._prev_states
+            n_iters += 1
+            if self.verbose:
+                print(f"Iter: {n_iters} || Cost: {self.prev_cost}")
 
     def update_states(
         self,
@@ -210,8 +220,9 @@ class ESGVI:
     def calculate_new_cost(self, new_information, new_covariance):
         new_cost = 0.5 * np.linalg.slogdet(new_information)[1]
         for factor in self.factor_list:
+            factor_states = [self.states[key] for key in factor.keys]
             new_cost += factor.evaluate_factor_cost(
-                self.states, new_covariance, new_information
+                factor_states, new_covariance, new_information
             )
 
         return new_cost
@@ -219,6 +230,8 @@ class ESGVI:
     def backtrack(
         self, new_info: np.ndarray, new_covar: np.ndarray, init_step_dist=1
     ) -> Tuple[bool, np.ndarray, np.ndarray]:
+        if self.verbose:
+            print(f"Starting backtracking as {self.new_cost} > {self.prev_cost}")
         # Recopy old states
         self.states = {k: v.copy() for k, v in self._prev_states.items()}
         delta_info = force_sym(new_info - self._information_matrix)
@@ -243,15 +256,22 @@ class ESGVI:
             )  # Don't update manifold covariance, this is accounted in the new_info subtraction
 
             # Calculate new cost with backtracked state, information and covariance values.
-            backtrack_cost = 0.5 * np.linalg.slogdet(backtrack_info)[1]
+            self._backtrack_cost = 0.5 * np.linalg.slogdet(backtrack_info)[1]
             for factor in self.factor_list:
-                backtrack_cost += factor.evaluate_factor_cost(
-                    self.states, backtrack_covar, backtrack_info
+                factor_states = [self.states[key] for key in factor.keys]
+                self._backtrack_cost += factor.evaluate_factor_cost(
+                    factor_states, backtrack_covar, backtrack_info
                 )
 
-            if backtrack_cost < self.prev_cost:
+            n_iters += 1
+            if self.verbose and (n_iters - 1) % 10 == 0:
+                print(
+                    f"Backtrack: {n_iters} || Step Size: {alpha:.4e} || Cost: {float(self._backtrack_cost):.6f}"
+                )
+
+            if self._backtrack_cost < self.prev_cost:
                 self.last_alpha = alpha
-                self.new_cost = backtrack_cost
+                self.new_cost = self._backtrack_cost
                 return True, backtrack_info, backtrack_covar
             else:
                 alpha *= 0.95
@@ -259,11 +279,18 @@ class ESGVI:
                 backtrack_info = (alpha * delta_info) + self._information_matrix
                 backtrack_covar = (alpha * delta_covar) + self._covariance_matrix
 
-            n_iters += 1
-
         return False, backtrack_info, backtrack_covar
 
-    def init_covariance(self, covariance: np.ndarray = None):
-
-        for factor in self.factor_list:
-            raise NotImplementedError
+    def init_covariance(self, covariance: np.ndarray):
+        if covariance.shape != (self._graph_total_dof, self._graph_total_dof):
+            raise ValueError(
+                f"Covariance has shape {covariance.shape}, rather than ({self._graph_total_dof}, {self._graph_total_dof})."
+            )
+        self._covariance_matrix = covariance.copy()
+        self._delta_mean = np.zeros((self._covariance_matrix.shape[0], 1))
+        if np.linalg.cond(covariance) < 1 / np.finfo(covariance.dtype).eps:
+            self._information_matrix = splg.solve(
+                self._covariance_matrix, np.identity(self._graph_total_dof)
+            )
+        else:
+            self._information_matrix = splg.pinv(self._covariance_matrix)
