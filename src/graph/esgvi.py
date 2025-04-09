@@ -147,11 +147,16 @@ class ESGVI:
                 new_info += info_update
 
             new_info = force_sym_PSD(new_info)
-            if np.linalg.cond(new_info) < (1 / np.finfo(new_info.dtype).eps):
-                new_info = regularize(new_info)
+            new_info = regularize(new_info)
 
             # TODO: Redo this using sparsity tricks
-            new_covar = force_sym_PSD(splg.pinv(new_info))
+            if np.linalg.cond(new_info) < (1 / np.finfo(new_info.dtype).eps):
+                new_covar = force_sym_PSD(
+                    splg.solve(new_info, np.identity(new_info.shape[0]))
+                )
+            else:
+                new_covar = force_sym_PSD(splg.pinv(new_info))
+
             self._delta_mean = splg.solve(new_info, -phi_dx)
             new_info, new_covar = self.update_states(
                 self._delta_mean, new_info, new_covar
@@ -177,9 +182,6 @@ class ESGVI:
                     self.cost_history.append(self.new_cost)
                     self.prev_cost = self.new_cost
                 else:
-
-                    if self.verbose:
-                        print(f"Backtracking failed...")
 
                     return self._prev_states
             n_iters += 1
@@ -209,11 +211,15 @@ class ESGVI:
                 new_state_covar = new_covariance[state_slice, state_slice].copy()
                 new_state_info = new_information[state_slice, state_slice].copy()
 
-                new_state_covar = jac_inv @ new_state_covar @ jac_inv.T
-                new_state_info = jac.T @ new_state_info @ jac
+                new_state_covar = force_sym_PSD(jac_inv @ new_state_covar @ jac_inv.T)
+                new_state_info = force_sym_PSD(jac.T @ new_state_info @ jac)
 
                 new_covariance[state_slice, state_slice] = new_state_covar
                 new_information[state_slice, state_slice] = new_state_info
+
+        #  TODO: Check this
+        new_covariance = force_sym_PSD(new_covariance)
+        new_information = force_sym_PSD(new_information)
 
         return new_information, new_covariance
 
@@ -279,6 +285,9 @@ class ESGVI:
                 backtrack_info = (alpha * delta_info) + self._information_matrix
                 backtrack_covar = (alpha * delta_covar) + self._covariance_matrix
 
+        if self.verbose:
+            print(f"Backtracking didn't find suitable step size after {n_iters}")
+
         return False, backtrack_info, backtrack_covar
 
     def init_covariance(self, covariance: np.ndarray):
@@ -294,3 +303,28 @@ class ESGVI:
             )
         else:
             self._information_matrix = splg.pinv(self._covariance_matrix)
+
+    def get_covariance_block(self, key_1: Hashable, key_2: Hashable) -> np.ndarray:
+        """Retrieve the covariance block corresponding to two variables.
+
+        Parameters
+        ----------
+        key_1 : Hashable
+            Key of first variable.
+        key_2 : Hashable
+            Key of second variable.
+
+        Returns
+        -------
+        np.ndarray
+            Covariance block corresponding to the two variables.
+        """
+
+        # Extract relevant block
+        try:
+            var_1_slice = self.state_slices[key_1]
+            var_2_slice = self.state_slices[key_2]
+
+            return self._covariance_matrix[var_1_slice, var_2_slice]
+        except KeyError as e:
+            print(f"Cannot compute covariance block!")

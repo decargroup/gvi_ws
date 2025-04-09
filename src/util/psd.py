@@ -56,7 +56,7 @@ def isPD(B: np.ndarray) -> bool:
 
 
 def regularize(
-    A: np.ndarray, cond_threshold=1e6, eps_min=1e-6, eps_max=1e3
+    A: np.ndarray, cond_threshold=1e4, eps_min=1e-6, eps_max=1e3
 ) -> np.ndarray:
     """Regularize matrix by adaptively adjusting the diagonal perturbation."""
     cond_number = np.linalg.cond(A)

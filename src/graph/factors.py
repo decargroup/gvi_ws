@@ -353,8 +353,12 @@ class ProcessFactor(Factor):
             raise ValueError(
                 f"Provided factor covariance needs to be ({self._total_dof},{self._total_dof})"
             )
-
-        sqrt_covariance = np.linalg.cholesky(factor_covar)
+        try:
+            sqrt_covariance = np.linalg.cholesky(factor_covar)
+            # sqrt_covariance = scipy.linalg.sqrtm(factor_covar)
+        except np.linalg.LinAlgError as e:
+            print(factor_covar)
+            raise np.linalg.LinAlgError("Process Factor joint covariance not PD")
         # vector_sigma_points = [
         #     sqrt_covariance @ sp_i.reshape((-1, 1)) for sp_i in self._unit_sigma_pts
         # ]
@@ -390,7 +394,9 @@ class ProcessFactor(Factor):
         self, states: List[State], covar_matrix: np.ndarray, info_matrix: np.ndarray
     ):
         # Get covariance/information at state level
+
         x_km1_covar = covar_matrix[self.state_slices[0], self.state_slices[0]]
+
         x_km1_info = info_matrix[self.state_slices[0], self.state_slices[0]]
 
         x_k_covar = covar_matrix[self.state_slices[1], self.state_slices[1]]
@@ -404,7 +410,6 @@ class ProcessFactor(Factor):
             [[x_km1_covar, cross_covar], [cross_covar.T, x_k_covar]]
         )
         factor_info = np.block([[x_km1_info, cross_info], [cross_info.T, x_k_info]])
-
         # Calculate sigma points from this new covariance
         sigma_points = self._gen_sigma_pts(states, factor_covar)
         # Get current state
