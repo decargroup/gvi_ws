@@ -47,3 +47,6 @@ util/__pycache__
 # Bash Scripts
 clean_figs.bash
 
+# Notes to self document
+notes_todo.txt
+

@@ -260,3 +260,6 @@ if __name__ == "__main__":
     print(
         f" MAP    | {np.mean(results_map.error[:,0]):.5f} | {np.mean(results_map.error[:,1]):.5f} | {np.mean(results_map.error[:,2]):.5f}"
     )
+    print(" -------------------------- ")
+    print(f"Total degrees of freedom x: {esgvi_graph._graph_total_dof}")
+    print(f"Poses: {(esgvi_graph._num_states):.0f}")
