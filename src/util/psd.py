@@ -56,7 +56,7 @@ def isPD(B: np.ndarray) -> bool:
 
 
 def regularize(
-    A: np.ndarray, cond_threshold=1e4, eps_min=1e-6, eps_max=1e3
+    A: np.ndarray, cond_threshold=1e6, eps_min=1e-6, eps_max=1e3, verbose=True
 ) -> np.ndarray:
     """Regularize matrix by adaptively adjusting the diagonal perturbation."""
     cond_number = np.linalg.cond(A)
@@ -66,7 +66,8 @@ def regularize(
             A += eps * np.eye(A.shape[0])
             cond_number = np.linalg.cond(A)
             eps *= 2  # Gradually increase epsilon
-        print(f"Regularized condition number {cond_number}, with epsilon = {eps}")
+        if verbose:
+            print(f"Regularized condition number {cond_number}, with epsilon = {eps}")
     return A
 
 
@@ -81,7 +82,7 @@ def force_PSD(A: np.ndarray) -> np.ndarray:
 
 
 # Force Symmetry
-def force_sym(A):
+def force_sym(A: np.ndarray) -> np.ndarray:
     A = (A + A.T) / 2
     return A
 

@@ -8,26 +8,27 @@ from navlie.lib.states import VectorState, VectorInput, SE2State
 
 
 class WheelEncoder(MeasurementModel):
-    def __init__(self, R_d:np.ndarray)-> None:
+    def __init__(self, R_d: np.ndarray) -> None:
         # R_d = diag(fwd_vel_var, side_slip_var, ang_vel_var)
         self.R = np.atleast_2d(R_d)
         return
-    
-    def evaluate(self, x:nav.State):
+
+    def evaluate(self, x: nav.State):
         if isinstance(x, SE2State):
             theta = x.group.Log(x)[0]
         elif isinstance(x, VectorState):
             theta = x.value[0]
         else:
             raise ValueError("WheelEncoder must take SE2State or VectorState as input.")
-        y = np.zeros((3,1))
-        y[0,0] = np.cos(theta) + np.sin(theta)
-        y[1,0] = -np.sin(theta) + np.cos(theta)
-        y[2,0] = 1
+        y = np.zeros((3, 1))
+        y[0, 0] = np.cos(theta) + np.sin(theta)
+        y[1, 0] = -np.sin(theta) + np.cos(theta)
+        y[2, 0] = 1
         return y
-    
+
     def covariance(self, x):
         return self.R
+
 
 class LaserRangeFinder(MeasurementModel):
     def __init__(self, R_d) -> None:
@@ -35,10 +36,11 @@ class LaserRangeFinder(MeasurementModel):
 
     def evaluate(self, x: nav.State) -> np.ndarray:
         return x.value[0]
-    
+
     def covariance(self, x: nav.State) -> np.ndarray:
         return self.R
-    
+
+
 class NonLinearLaserRangeFinder(MeasurementModel):
     def __init__(self, R_d, height, distance) -> None:
         self.R = R_d
@@ -49,23 +51,31 @@ class NonLinearLaserRangeFinder(MeasurementModel):
         if x.value[0] + self.distance <= 0:
             print(f"Mass goes beyond the wall, position: {x.value[0]}")
             raise ValueError()
-        range_measure = np.sqrt(np.square(x.value[0] + self.distance) + np.square(self.height))
+        range_measure = np.sqrt(
+            np.square(x.value[0] + self.distance) + np.square(self.height)
+        )
         return range_measure
-    
+
     def covariance(self, x: nav.State) -> np.ndarray:
-        return self.R
-    
+        return np.atleast_2d(self.R)
+
+
 class StereoCamera(MeasurementModel):
-    def __init__(self,R_d:np.ndarray, landmark_pos:np.ndarray, f=400, b = 0.1):
+    def __init__(self, R_d: np.ndarray, landmark_pos: np.ndarray, f=400, b=0.1):
         self.R = np.atleast_2d(R_d)
         self.landmark_pos = np.atleast_1d(landmark_pos)
         self.focal_len = f
         self.disparity = b
-    def evaluate(self, x:nav.State) -> np.ndarray:
-        y = np.atleast_2d(self.focal_len * self.disparity / (self.landmark_pos - x.value[0]))
+
+    def evaluate(self, x: nav.State) -> np.ndarray:
+        y = np.atleast_2d(
+            self.focal_len * self.disparity / (self.landmark_pos - x.value[0])
+        )
         return y
-    def covariance(self, x:nav.State) -> np.ndarray: 
+
+    def covariance(self, x: nav.State) -> np.ndarray:
         return self.R
+
 
 class MassSpringDamperSystem:
 
@@ -74,26 +84,24 @@ class MassSpringDamperSystem:
         self.c = c
         self.k = k
         self.f = lambda t: 0
-        self.A = np.array([[0, 1],
-                           [-self.k/self.m, -self.c/self.m]])
-        self.B = np.array([[0],
-                           [1/self.m]])
-        
-    
+        self.A = np.array([[0, 1], [-self.k / self.m, -self.c / self.m]])
+        self.B = np.array([[0], [1 / self.m]])
+
     def set_force(self, f) -> None:
         self.f = f
-    
+
     def calc_force(self, t):
         return np.array([[self.f(t)]])
 
-    def ode(self, t: float, x:np.ndarray):
-        x = x.reshape(2,1)
+    def ode(self, t: float, x: np.ndarray):
+        x = x.reshape(2, 1)
         x_dot = (self.A @ x) + (self.B @ self.calc_force(t))
         return x_dot.ravel()
-    
-class Simulator():
 
-    def __init__(self, t_end = 10, freq=100, x0 = [5,0]):
+
+class Simulator:
+
+    def __init__(self, t_end=10, freq=100, x0=[5, 0]):
         self.t_start = 0
         self.t_end = t_end
         self.dt = 1 / freq
@@ -102,12 +110,14 @@ class Simulator():
         self.mass = 1
         self.spring_const = 0.8
         self.damping_const = 0.5
-        self.dynamics_model = MassSpringDamperSystem(self.mass, self.spring_const,self.damping_const)
+        self.dynamics_model = MassSpringDamperSystem(
+            self.mass, self.spring_const, self.damping_const
+        )
 
     def set_forcing_function(self, f):
         self.dynamics_model.set_force(f)
         return
-    
+
     def generate_ground_truth(self):
         """
         Get ground truth measurements.
@@ -116,17 +126,18 @@ class Simulator():
         true_position, true_velocity, true_acceleration
         """
         sol = integrate.solve_ivp(
-                        self.dynamics_model.ode,
-                        (self.t_start,self.t_end),
-                        self.x0,
-                        args=(),
-                        t_eval=self.time,
-                        rtol = 1e-6,
-                        atol=1e-6,
-                        method='RK45')
+            self.dynamics_model.ode,
+            (self.t_start, self.t_end),
+            self.x0,
+            args=(),
+            t_eval=self.time,
+            rtol=1e-6,
+            atol=1e-6,
+            method="RK45",
+        )
         sol_x = sol.y
-        self.true_position = np.array(sol_x[0,:])
-        self.true_velocity = np.array(sol_x[1,:])
+        self.true_position = np.array(sol_x[0, :])
+        self.true_velocity = np.array(sol_x[1, :])
         self.gt_data = []
         for i, pos in enumerate(self.true_position):
             vel = self.true_velocity[i]
@@ -136,17 +147,20 @@ class Simulator():
 
         acc_list = []
         for i in range(len(self.time)):
-            acc = self.dynamics_model.ode(self.time[i], sol_x[:,i])[1]
+            acc = self.dynamics_model.ode(self.time[i], sol_x[:, i])[1]
             acc_list.append(acc)
         self.true_acceleration = np.array(acc_list)
 
         return self.true_position, self.true_velocity, self.true_acceleration
-    
-    
-    def generate_measurements(self, sigma_acc, 
-                              pos_freq, acc_freq, 
-                              meas_model:MeasurementModel,
-                              add_noise = True):
+
+    def generate_measurements(
+        self,
+        sigma_acc,
+        pos_freq,
+        acc_freq,
+        meas_model: MeasurementModel,
+        add_noise=True,
+    ):
         """
         Returns:
 
@@ -156,28 +170,39 @@ class Simulator():
         input_list = []
         noisy_extero_vals = []
         time_list = []
-        sample_every = int((1/self.dt) / pos_freq)
-        for i in range(0,len(self.true_position),sample_every):
+        sample_every = int((1 / self.dt) / pos_freq)
+        for i in range(0, len(self.true_position), sample_every):
             meas = meas_model.evaluate(self.gt_data[i])
             meas_val = meas.ravel()
             noisy_meas_val = meas_val
             if add_noise:
-                noisy_meas_val += np.sqrt(meas_model.covariance(self.gt_data[i])).ravel()*np.random.randn()
-            noisy_meas = Measurement(value=np.array([noisy_meas_val]), stamp=round(self.time[i], ndigits=4), model=meas_model)
+                noisy_meas_val += (
+                    np.sqrt(meas_model.covariance(self.gt_data[i])).ravel()
+                    * np.random.randn()
+                )
+            noisy_meas = Measurement(
+                value=np.array([noisy_meas_val]),
+                stamp=round(self.time[i], ndigits=4),
+                model=meas_model,
+            )
             self.meas_data.append(noisy_meas)
             noisy_extero_vals.append(noisy_meas_val)
             time_list.append(self.time[i])
 
-        sample_every = int((1/self.dt) / acc_freq)
+        sample_every = int((1 / self.dt) / acc_freq)
         Q_d_sim = sigma_acc**2 / self.dt
-        
-        for i in range(0, len(self.true_acceleration),sample_every):
+
+        for i in range(0, len(self.true_acceleration), sample_every):
             noisy_input = self.true_acceleration[i]
             if add_noise:
-                noisy_input += np.sqrt(Q_d_sim)*np.random.randn()
-            
+                noisy_input += np.sqrt(Q_d_sim) * np.random.randn()
+
             input_list.append(noisy_input)
-            u_k = VectorInput(value=np.array([noisy_input]), stamp=round(self.time[i], ndigits=4), covariance=Q_d_sim)
+            u_k = VectorInput(
+                value=np.array([noisy_input]),
+                stamp=round(self.time[i], ndigits=4),
+                covariance=Q_d_sim,
+            )
             self.input_data.append(u_k)
 
         self.measured_position = np.array(noisy_extero_vals)
@@ -185,10 +210,11 @@ class Simulator():
         self.measured_time = np.array(time_list)
 
         return self.measured_position, self.measured_acceleration, self.measured_time
-    
+
     def get_nav_info(self):
         return self.gt_data, self.input_data, self.meas_data
-    
+
+
 class DoubleIntegrator(ProcessModel):
     """
     The double-integrator process model is a second-order point kinematic model
@@ -233,11 +259,10 @@ class DoubleIntegrator(ProcessModel):
     def covariance(self, x, u, dt) -> np.ndarray:
         Ld = self.input_jacobian(dt)
         sigma_acc = np.sqrt(self._Q * dt)
-        Q = np.array([[(1/3) * dt**3, 0.5 * dt**2],
-                    [0.5*dt**2, dt]]) * sigma_acc**2
+        Q = np.array([[(1 / 3) * dt**3, 0.5 * dt**2], [0.5 * dt**2, dt]]) * sigma_acc**2
         # return Ld @ self._Q @ Ld.T
         return Q
-    
+
     def input_covariance(self, x, u, dt):
         return self._Q
 
@@ -246,48 +271,55 @@ class DoubleIntegrator(ProcessModel):
         Ld[0 : self.dim, :] = 0.5 * dt**2 * np.identity(self.dim)
         Ld[self.dim :, :] = dt * np.identity(self.dim)
         return Ld
-    
-if __name__=="__main__":
+
+
+if __name__ == "__main__":
     from matplotlib import pyplot as plt
-    
+
     # %%
     sigma_acc_continuous = 0.045
     R_k = 0.01
     laser_range_freq = 10
     imu_freq = 100
 
-    Simulation = Simulator(t_end=20, freq=imu_freq, x0=[5,0])
+    Simulation = Simulator(t_end=20, freq=imu_freq, x0=[5, 0])
     # Set Forcing Function
     # Forcing function f(t) = A sin(wt)
-    f = lambda t: 1 * np.sin(2*np.pi*t)
+    f = lambda t: 1 * np.sin(2 * np.pi * t)
     # Change function in mass spring damper
     Simulation.set_forcing_function(f)
     # Generating ground truth
     true_pos, true_vel, true_acc = Simulation.generate_ground_truth()
     t = Simulation.time
-    fig, ax = plt.subplots(3,1, sharex=True)
-    ax[0].set_ylabel(r'$x(t)$ (m)')
+    fig, ax = plt.subplots(3, 1, sharex=True)
+    ax[0].set_ylabel(r"$x(t)$ (m)")
     # ax[0].set_xlabel(r'$t$ [s]')
-    ax[0].plot(t,true_pos)
+    ax[0].plot(t, true_pos)
 
-    ax[1].set_ylabel(r'$\dot{x}(t)$ (m/s)')
+    ax[1].set_ylabel(r"$\dot{x}(t)$ (m/s)")
     # ax[1].set_xlabel(r'$t$ [s]')
-    ax[1].plot(t,true_vel)
+    ax[1].plot(t, true_vel)
 
-    ax[2].set_ylabel(r'$\ddot{x}(t)$ (m/s)')
-    ax[2].set_xlabel(r'$t$ (s)')
-    ax[2].plot(t,true_acc)
-
+    ax[2].set_ylabel(r"$\ddot{x}(t)$ (m/s)")
+    ax[2].set_xlabel(r"$t$ (s)")
+    ax[2].plot(t, true_acc)
 
     # %%
     meas_model = NonLinearLaserRangeFinder(R_d=R_k, height=2, distance=7)
-    measured_pos, measured_acc, measured_time = Simulation.generate_nonlinear_measurements(sigma_acc=sigma_acc_continuous, pos_freq=laser_range_freq, acc_freq=imu_freq, meas_model=meas_model)
-    fig, ax = plt.subplots(2,1, sharex=True)
-    ax[0].set_ylabel(r'$y(t)$ (m)')
+    measured_pos, measured_acc, measured_time = (
+        Simulation.generate_nonlinear_measurements(
+            sigma_acc=sigma_acc_continuous,
+            pos_freq=laser_range_freq,
+            acc_freq=imu_freq,
+            meas_model=meas_model,
+        )
+    )
+    fig, ax = plt.subplots(2, 1, sharex=True)
+    ax[0].set_ylabel(r"$y(t)$ (m)")
     # ax[0].set_xlabel(r'$t$ (s)')
-    ax[0].scatter(measured_time,measured_pos,s=0.05, marker = 'x')
+    ax[0].scatter(measured_time, measured_pos, s=0.05, marker="x")
 
-    ax[1].set_ylabel(r'$u^{acc}(t)$ ($\frac{m}{s^2}$)')
-    ax[1].set_xlabel(r'$t$ (s)')    
-    ax[1].scatter(Simulation.time,measured_acc, s=0.05)
+    ax[1].set_ylabel(r"$u^{acc}(t)$ ($\frac{m}{s^2}$)")
+    ax[1].set_xlabel(r"$t$ (s)")
+    ax[1].scatter(Simulation.time, measured_acc, s=0.05)
     # %%

@@ -25,16 +25,21 @@ from src.util.psd import (
     force_sym,
     regularize,
     fast_positive_definite_inverse,
-    isPD,
 )
 from src.util.sparsity import force_block_banded_sparsity
 from src.util.map_batch import construct_planar_map
+from src.models.models import (
+    Simulator,
+    NonLinearLaserRangeFinder,
+    LaserRangeFinder,
+    DoubleIntegrator,
+    StereoCamera,
+)
 from navlie.types import State, StateWithCovariance, Measurement, Input
 from navlie.lib.states import MatrixLieGroupState, SE2State, VectorState
 from navlie.filters import generate_sigmapoints
 from navlie.lib.models import (
     BodyFrameVelocity,
-    DoubleIntegrator,
     RangePointToAnchor,
     PointRelativePosition,
 )
@@ -44,76 +49,80 @@ from typing import List, Tuple
 
 # %%
 if __name__ == "__main__":
-    np.random.seed(2)
-    T_END = 0.05
+    np.random.seed(1)
+    T_END = 3.0
+    LINEAR = False
+    STEREO = True
     NOISE = True
     CUB_METHOD = "gh"
     CUB_ORDER = 3
     MAP_INIT = False
     TIME_IT = False
+    STEP_TOL = 1e-8
     # ESGVI params
     BACKTRACK = False
     VERBOSE = True
     MAX_ITERS = 10
-    BACK_ITERS = 1
+    BACK_ITERS = 10
     INIT_STEP_SIZE = 1e0
     # Script Params
-    SAVE_FIGS = False
+    SAVE_FIGS = True
     SHOW_FIGS = True
 
-    # Init Prior
-    x0 = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
-    P0 = np.identity(3) * 1e-2
-    # Init landmarks
-    landmark_positions = [[2, 1]]
-    landmark_states = [
-        VectorState(landmark, state_id=f"l{i}")
-        for i, landmark in enumerate(landmark_positions)
-    ]
-    # Init models
-    Q_d = np.identity(3) * 0.2
-    proc_model = BodyFrameVelocity(Q=Q_d)
-    proc_model_freq = 100
+    ######## SIM SETUP ###########
+    laser_range_freq = 10
+    imu_freq = 100
+    sigma_acc_continuous = 0.02
+    dt = 1 / imu_freq
+    R_k = np.array([0.05])
+    if LINEAR:
+        meas_model = LaserRangeFinder(R_d=R_k)
+    else:
+        if STEREO:
+            R_k = np.array([0.01])
+            landmark_pos = np.array([10])
+            meas_model = StereoCamera(R_d=R_k, landmark_pos=landmark_pos)
+        else:
+            meas_model = NonLinearLaserRangeFinder(R_d=R_k, height=5, distance=8)
 
-    # Meas Model
-    R_d = np.identity(2) * 1e-1
-    meas_models_gen = [
-        PointRelativePosition(
-            landmark_position=np.array([l.value]), R=R_d, landmark_id="l0"
-        )
-        for l in landmark_states
-    ]
-    # R_d = np.identity(1) * 1e-1
-    # meas_models_gen = [
-    #     RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
-    # ]
-    meas_model_freq = 10
+    x0_val = [5, 0]
+    Simulation = Simulator(t_end=T_END, freq=imu_freq, x0=x0_val)
+    # Set Forcing Function
+    # Forcing function f(t) = A sin(wt)
+    f = lambda t: 1 * np.sin(2 * np.pi * t)
+    Simulation.set_forcing_function(f)
+    # Generating ground truth
+    true_pos, true_vel, true_acc = Simulation.generate_ground_truth()
 
-    # Input Profile
-    input_profile = lambda t, x: np.array([np.cos(0.1 * t), 1.0, 0])
-
-    # Data Generation
-    dg = nav.DataGenerator(
-        proc_model,
-        input_profile,
-        Q_d,
-        input_freq=proc_model_freq,
-        meas_model_list=meas_models_gen,
-        meas_freq_list=[meas_model_freq] * len(meas_models_gen),
+    meas_pos, _, meas_t = Simulation.generate_measurements(
+        sigma_acc=sigma_acc_continuous,
+        pos_freq=laser_range_freq,
+        acc_freq=imu_freq,
+        meas_model=meas_model,
+        add_noise=NOISE,
     )
-    gt_poses, input_data, meas_data = dg.generate(
-        x0.copy(), start=0.0, stop=T_END, noise=NOISE
-    )
-    # If limit on poses wanted
+    # Get Navlie formatted data
+    gt_data, input_data, meas_data = Simulation.get_nav_info()
     input_data_lim = input_data[:]
     meas_data_lim = meas_data[:]
-    gt_data_lim = gt_poses[:]
+    gt_data_lim = gt_data[:]
+    # input_data_lim = input_data[0:2]
+    # meas_data_lim = meas_data[0:1]
 
+    state_dof = len(x0_val)
+    x0_state = VectorState(value=np.array(x0_val), stamp=gt_data[0].stamp)
+    # sigma_acc_continuous = 100
+    dt = 1 / imu_freq
+    Q_d = np.array([[sigma_acc_continuous**2 / dt]])
+    proc_model = DoubleIntegrator(Q_d)
+    P0 = np.eye(2) * 1e-3
     if NOISE:
-        x0_state = x0.plus(nav.randvec(P0))
+        x0_state = x0_state.plus(nav.randvec(P0))
 
-    # MAP Computation
-    print("Starting MAP Estimation")
+    x0 = StateWithCovariance(state=x0_state.copy(), covariance=P0)
+    ###############################
+    # MAP Setup
+    ###############################
     problem, init_pose_est = construct_planar_map(
         x0=x0_state.copy(),
         P0=np.copy(P0),
@@ -121,13 +130,14 @@ if __name__ == "__main__":
         process_model=proc_model,
         meas_data=meas_data_lim,
         slam=False,
+        step_tol=STEP_TOL,
     )
+
     # Initialize ESGVI information
     problem.variables = {k: v.copy() for k, v in problem.variables_init.items()}
     problem._compute_size_of_problem()
     _, H, _ = problem.compute_error_jac_cost()
     esgvi_init_info: np.ndarray = (H.T @ H).copy()
-    #
     # %%
     if TIME_IT:
         timer = timeit.default_timer
@@ -161,7 +171,6 @@ if __name__ == "__main__":
         est_list_map.append(estimate_list_map[match[0]])
 
     results_map = nav.GaussianResultList.from_estimates(est_list_map, gt_list)
-
     ###############################
     # Generate ESGVI Factor Graph
     ###############################
@@ -184,6 +193,7 @@ if __name__ == "__main__":
     esgvi_graph.max_iters = MAX_ITERS
     esgvi_graph.backtrack_iters = BACK_ITERS
     esgvi_graph.init_step_distance = INIT_STEP_SIZE
+    esgvi_graph.step_tol = STEP_TOL
 
     # %%
     # Start solving
@@ -233,43 +243,13 @@ if __name__ == "__main__":
         alpha=0.1,
         color="orange",
     )
-    ax[2].set_ylabel(r"$y$ (m)")
-    ax[2].plot(
-        results_gvi.stamp, results_gvi.error[:, 2], label="ESGVI", linestyle="--"
-    )
-    ax[2].fill_between(
-        results_gvi.stamp,
-        results_gvi.three_sigma[:, 2],
-        -results_gvi.three_sigma[:, 2],
-        alpha=0.1,
-        color="orange",
-    )
     ax[1].set_xlabel("Time (s)")
     ax[0].legend(loc="upper right")
     ax[1].legend()
-    ax[2].legend()
     plt.tight_layout()
     if SAVE_FIGS:
         plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_3sigma.pdf"
-        )
-    if SHOW_FIGS:
-        plt.show()
-
-    # Poses Plot
-    fig, ax = nav.plot_poses(poses=pose_list_map, step=100, label="MAP")
-    fig, ax = nav.plot_poses(pose_list_gvi, step=100, ax=ax, label="ESGVI")
-    fig, ax = nav.plot_poses(poses=gt_data_lim, ax=ax, step=None, label="Ground Truth")
-    for l in landmark_states:
-        ax.plot(l.value[0], l.value[1], "x")
-    ax.set_title("Estimated poses")
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.legend()
-    plt.tight_layout()
-    if SAVE_FIGS:
-        plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_traj.pdf"
+            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/2d_3sigma.pdf"
         )
     if SHOW_FIGS:
         plt.show()
@@ -283,7 +263,7 @@ if __name__ == "__main__":
     axs.set_title("NEES")
     if SAVE_FIGS:
         plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_NEES.pdf"
+            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/2d_NEES.pdf"
         )
     if SHOW_FIGS:
         plt.show()
@@ -293,10 +273,10 @@ if __name__ == "__main__":
     print(" Method | Heading  |    X    |   Y ")
     print("----------------------------------------")
     print(
-        f" ESGVI  | {np.mean(results_gvi.error[:,0]):.5f} | {np.mean(results_gvi.error[:,1]):.5f} | {np.mean(results_gvi.error[:,2]):.5f}"
+        f" ESGVI  | {np.mean(results_gvi.error[:,0]):.5f} | {np.mean(results_gvi.error[:,1]):.5f}"
     )
     print(
-        f" MAP    | {np.mean(results_map.error[:,0]):.5f} | {np.mean(results_map.error[:,1]):.5f} | {np.mean(results_map.error[:,2]):.5f}"
+        f" MAP    | {np.mean(results_map.error[:,0]):.5f} | {np.mean(results_map.error[:,1]):.5f}"
     )
     print(" -------------------------- ")
     print(f"Total degrees of freedom x: {esgvi_graph._graph_total_dof}")

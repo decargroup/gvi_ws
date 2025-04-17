@@ -15,7 +15,7 @@ from navlie.lib.states import (
 from navlie.types import ProcessModel, Measurement, Input, StateWithCovariance
 from navlie.batch.problem import Problem
 from navlie.utils import find_nearest_stamp_idx
-from src.util.psd import force_sym_PSD
+from src.util.psd import force_sym_PSD, isPD, force_sym
 from abc import abstractmethod
 
 
@@ -43,8 +43,9 @@ class Factor:
 
         else:
             raise ValueError("The field cubature must be 'gh' or 'spherical'.")
-        self._order = order
+        self._order: int = order
 
+        self.type: str = None
         # State Slices for information/covariance matrices
         self.state_slices: List[slice] = [variable_slices[k] for k in self.keys]
 
@@ -64,12 +65,17 @@ class Factor:
     def _gen_unit_sigma_pts(self) -> Tuple[np.ndarray, np.ndarray]:
         return self._cubature_fun(state_dof=self._total_dof, order_p=self._order)
 
-    def _phi_dx(self, information: np.ndarray):
-        return information @ self.expect_column
+    def _phi_dx(self, column_expect: np.ndarray, information: np.ndarray):
+        return information @ column_expect
 
-    def _phi_dx_dx(self, information: np.ndarray):
-        a = information @ self.expect_matrix @ information
-        b = information * self.expect_scalar
+    def _phi_dx_dx(
+        self,
+        expect_scalar: np.ndarray,
+        expect_matrix: np.ndarray,
+        information: np.ndarray,
+    ):
+        a = information @ expect_matrix @ information
+        b = information * expect_scalar
         return a - b
 
     @abstractmethod
@@ -116,6 +122,8 @@ class PriorFactor(Factor):
         order: int = 3,
     ):
         super().__init__(keys, variable_slices, projection, cubature, order)
+
+        self.type = "prior"
 
         # Setup factor specific values
         self._prior_covariance = prior_covariance.copy()
@@ -165,14 +173,18 @@ class PriorFactor(Factor):
         """
         # Get covariance/information at factor level
         factor_covar = covar_matrix[self.state_slices[0], self.state_slices[0]]
-        factor_info = info_matrix[self.state_slices[0], self.state_slices[0]]
+        # factor_info = info_matrix[self.state_slices[0], self.state_slices[0]]
+        factor_info = force_sym(scipy.linalg.inv(factor_covar))
         # Calculate sigma points from this new covariance
         sigma_points = self._gen_sigma_pts(states, factor_covar)
         # Get current state
         x = states[0]
 
-        expect_phi = np.zeros((1, 1))
+        # Scalar Valued
+        expect_phi = np.zeros((1, 1), dtype=np.float64)
+        # Column Valued
         expect_mu_phi = np.zeros((self._dof, 1), dtype=np.float64)
+        # Matrix Valued
         expect_mu_mu_phi = np.zeros((self._dof, self._dof), dtype=np.float64)
 
         # TODO: Vectorize this
@@ -183,16 +195,14 @@ class PriorFactor(Factor):
             expect_mu_phi += w * diff * phi_k
             expect_mu_mu_phi += w * (diff @ diff.T) * phi_k
 
-        self.expect_scalar = expect_phi.copy()
-        self.expect_column = expect_mu_phi.copy()
-        self.expect_matrix = expect_mu_mu_phi.copy()
-
-        global_column = self.projection.T @ self._phi_dx(factor_info)
+        global_column = self.projection.T @ self._phi_dx(expect_mu_phi, factor_info)
         global_matrix = (
-            self.projection.T @ self._phi_dx_dx(factor_info) @ self.projection
+            self.projection.T
+            @ self._phi_dx_dx(expect_phi, expect_mu_mu_phi, factor_info)
+            @ self.projection
         )
 
-        return self.expect_scalar, global_column, global_matrix
+        return expect_phi, global_column, global_matrix
 
     def evaluate_factor_cost(self, states, covar_matrix, info_matrix):
         # Get covariance/information at factor level
@@ -207,9 +217,7 @@ class PriorFactor(Factor):
             phi_k = self._eval_factor(sigma_points[i])
             expect_phi += w * phi_k
 
-        self.expect_scalar = expect_phi.copy()
-
-        return self.expect_scalar
+        return expect_phi
 
 
 class MeasurementFactor(Factor):
@@ -227,6 +235,7 @@ class MeasurementFactor(Factor):
         super().__init__(keys, variable_slices, projection, cubature, order)
 
         # Setup factor specific values
+        self.type = "meas"
         self._meas_val: np.ndarray = measurement.value
         self._meas_model: nav.MeasurementModel = measurement.model
 
@@ -256,7 +265,9 @@ class MeasurementFactor(Factor):
         meas_diff = (
             self._meas_val - self._meas_model.evaluate(sigma_points[0])
         ).reshape((-1, 1))
-        R_k_inv = scipy.linalg.inv(self._meas_model.covariance(sigma_points[0]))
+        R_k_inv = force_sym(
+            scipy.linalg.inv(self._meas_model.covariance(sigma_points[0]))
+        )
         phi_meas = 0.5 * meas_diff.T @ R_k_inv @ meas_diff
         return phi_meas
 
@@ -265,7 +276,8 @@ class MeasurementFactor(Factor):
     ):
         # Get covariance/information at factor level
         factor_covar = covar_matrix[self.state_slices[0], self.state_slices[0]]
-        factor_info = info_matrix[self.state_slices[0], self.state_slices[0]]
+        # factor_info = info_matrix[self.state_slices[0], self.state_slices[0]]
+        factor_info = force_sym(scipy.linalg.inv(factor_covar))
         # Calculate sigma points from this factors covariance
         sigma_points = self._gen_sigma_pts(states, factor_covar)
         # Get current state
@@ -283,16 +295,14 @@ class MeasurementFactor(Factor):
             expect_mu_phi += w * diff * phi_k
             expect_mu_mu_phi += w * (diff @ diff.T) * phi_k
 
-        self.expect_scalar = expect_phi.copy()
-        self.expect_column = expect_mu_phi.copy()
-        self.expect_matrix = expect_mu_mu_phi.copy()
-
-        global_column = self.projection.T @ self._phi_dx(factor_info)
+        global_column = self.projection.T @ self._phi_dx(expect_mu_phi, factor_info)
         global_matrix = (
-            self.projection.T @ self._phi_dx_dx(factor_info) @ self.projection
+            self.projection.T
+            @ self._phi_dx_dx(expect_phi, expect_mu_mu_phi, factor_info)
+            @ self.projection
         )
 
-        return self.expect_scalar, global_column, global_matrix
+        return expect_phi, global_column, global_matrix
 
     def evaluate_factor_cost(self, states, covar_matrix, info_matrix):
         # Get covariance/information at factor level
@@ -308,9 +318,7 @@ class MeasurementFactor(Factor):
             phi_k = self._eval_factor(sigma_points[i])
             expect_phi += w * phi_k
 
-        self.expect_scalar = expect_phi.copy()
-
-        return self.expect_scalar
+        return expect_phi
 
 
 class ProcessFactor(Factor):
@@ -331,6 +339,7 @@ class ProcessFactor(Factor):
         if len(self.keys) != 2:
             raise ValueError("Process factor must depend on two states.")
 
+        self.type = "proc"
         self._process_model = process_model
         self._input = input
 
@@ -358,7 +367,9 @@ class ProcessFactor(Factor):
             # sqrt_covariance = scipy.linalg.sqrtm(factor_covar)
         except np.linalg.LinAlgError as e:
             print(factor_covar)
-            raise np.linalg.LinAlgError("Process Factor joint covariance not PD")
+            raise np.linalg.LinAlgError(
+                "Process Factor joint covariance not Positive-Definite"
+            )
         # vector_sigma_points = [
         #     sqrt_covariance @ sp_i.reshape((-1, 1)) for sp_i in self._unit_sigma_pts
         # ]
@@ -382,10 +393,15 @@ class ProcessFactor(Factor):
     def _eval_factor(self, sigma_points: List[State]):
         sp_km1 = sigma_points[0]
         sp_k = sigma_points[1]
+        # TODO: Check stamps
         dt = sp_k.stamp - sp_km1.stamp
+        assert dt > 0.0
         propagated = self._process_model.evaluate(sp_km1, self._input, dt)
         Q_k = force_sym_PSD(self._process_model.covariance(sp_km1, self._input, dt))
         Q_k_inv = scipy.linalg.inv(Q_k)
+        # TODO: Check this
+        if isinstance(propagated, MatrixLieGroupState):
+            assert propagated.direction == sp_k.direction
         process_diff = sp_k.minus(propagated).reshape((-1, 1))
         phi_proc = 0.5 * process_diff.T @ Q_k_inv @ process_diff
         return phi_proc
@@ -409,7 +425,15 @@ class ProcessFactor(Factor):
         factor_covar = np.block(
             [[x_km1_covar, cross_covar], [cross_covar.T, x_k_covar]]
         )
-        factor_info = np.block([[x_km1_info, cross_info], [cross_info.T, x_k_info]])
+        factor_covar_proj = self.projection @ covar_matrix @ self.projection.T
+
+        assert np.allclose(factor_covar, factor_covar_proj)
+        assert isPD(
+            factor_covar
+        ), f"Process Factor Covar: \n {factor_covar}\nis not positive-definite"
+
+        # factor_info = np.block([[x_km1_info, cross_info], [cross_info.T, x_k_info]])
+        factor_info = force_sym(scipy.linalg.inv(factor_covar))
         # Calculate sigma points from this new covariance
         sigma_points = self._gen_sigma_pts(states, factor_covar)
         # Get current state
@@ -432,16 +456,14 @@ class ProcessFactor(Factor):
             expect_mu_phi += w * diff * phi_k
             expect_mu_mu_phi += w * (diff @ diff.T) * phi_k
 
-        self.expect_scalar = expect_phi.copy()
-        self.expect_column = expect_mu_phi.copy()
-        self.expect_matrix = expect_mu_mu_phi.copy()
-
-        global_column = self.projection.T @ self._phi_dx(factor_info)
+        global_column = self.projection.T @ self._phi_dx(expect_mu_phi, factor_info)
         global_matrix = (
-            self.projection.T @ self._phi_dx_dx(factor_info) @ self.projection
+            self.projection.T
+            @ self._phi_dx_dx(expect_phi, expect_mu_mu_phi, factor_info)
+            @ self.projection
         )
 
-        return self.expect_scalar, global_column, global_matrix
+        return expect_phi, global_column, global_matrix
 
     def evaluate_factor_cost(
         self, states: List[State], covar_matrix: np.ndarray, info_matrix: np.ndarray
@@ -457,7 +479,11 @@ class ProcessFactor(Factor):
         factor_covar = np.block(
             [[x_km1_covar, cross_covar], [cross_covar.T, x_k_covar]]
         )
-
+        factor_covar_proj = self.projection @ covar_matrix @ self.projection.T
+        assert np.allclose(factor_covar, factor_covar_proj)
+        assert isPD(
+            factor_covar
+        ), f"Process Factor Covar: \n {factor_covar}\nis not positive-definite"
         # Calculate sigma points from this new covariance
         sigma_points = self._gen_sigma_pts(states, factor_covar)
 
@@ -468,6 +494,4 @@ class ProcessFactor(Factor):
             phi_k = self._eval_factor(sigma_points[i])
             expect_phi += w * phi_k
 
-        self.expect_scalar = expect_phi.copy()
-
-        return self.expect_scalar
+        return expect_phi
