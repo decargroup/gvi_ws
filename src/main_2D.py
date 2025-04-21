@@ -219,6 +219,12 @@ if __name__ == "__main__":
     #####################
     ##### PLOT GVI ######
     #####################
+    # Plotting parameters
+    plt.rc("text", usetex=True)
+    plt.rc("font", family="serif", size=14)
+    plt.rc("lines", linewidth=2)
+    plt.rc("axes", grid=True)
+    plt.rc("grid", linestyle="--")
 
     fig, ax = nav.plot_error(results_map, label="MAP")
     ax[0].set_ylabel(r"$\theta$ (rad)")

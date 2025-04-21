@@ -45,12 +45,13 @@ from typing import List, Tuple
 # %%
 if __name__ == "__main__":
     np.random.seed(2)
-    T_END = 0.05
+    T_END = 1.0
     NOISE = True
     CUB_METHOD = "gh"
     CUB_ORDER = 3
     MAP_INIT = False
     TIME_IT = False
+    STEP_TOL = 1e-8
     # ESGVI params
     BACKTRACK = False
     VERBOSE = True
@@ -58,8 +59,8 @@ if __name__ == "__main__":
     BACK_ITERS = 1
     INIT_STEP_SIZE = 1e0
     # Script Params
-    SAVE_FIGS = False
-    SHOW_FIGS = True
+    SAVE_FIGS = True
+    SHOW_FIGS = False
 
     # Init Prior
     x0 = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
@@ -121,6 +122,7 @@ if __name__ == "__main__":
         process_model=proc_model,
         meas_data=meas_data_lim,
         slam=False,
+        step_tol=STEP_TOL,
     )
     # Initialize ESGVI information
     problem.variables = {k: v.copy() for k, v in problem.variables_init.items()}
@@ -184,6 +186,7 @@ if __name__ == "__main__":
     esgvi_graph.max_iters = MAX_ITERS
     esgvi_graph.backtrack_iters = BACK_ITERS
     esgvi_graph.init_step_distance = INIT_STEP_SIZE
+    esgvi_graph.step_tol = STEP_TOL
 
     # %%
     # Start solving
@@ -209,6 +212,12 @@ if __name__ == "__main__":
     #####################
     ##### PLOT GVI ######
     #####################
+    # Plotting parameters
+    plt.rc("text", usetex=True)
+    plt.rc("font", family="serif", size=14)
+    plt.rc("lines", linewidth=2)
+    plt.rc("axes", grid=True)
+    plt.rc("grid", linestyle="--")
 
     fig, ax = nav.plot_error(results_map, label="MAP")
     ax[0].set_ylabel(r"$\theta$ (rad)")

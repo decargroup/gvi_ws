@@ -89,18 +89,23 @@ class ESGVI:
         converged = False
         if size_delta_mean <= self.step_tol and size_delta_info <= self.step_tol:
             converged = True
-            print(f"Mean and covariance converged to {self.step_tol} tolerance.")
+            if self.verbose:
+                print(f"Mean and covariance converged to {self.step_tol} tolerance.")
 
         if delta_cost is not None:
             if cost != 0:
                 rel_cost_change = delta_cost / cost
                 if rel_cost_change <= self.step_tol:
                     converged = True
-                    print(f"Coverged with relative cost change of {self.step_tol}.")
+                    if self.verbose:
+                        print(
+                            f"Converged with relative cost change of {self.step_tol}."
+                        )
 
         if n_iters >= self.max_iters:
             converged = True
-            print(f"Reached max iterations of {n_iters}.")
+            if self.verbose:
+                print(f"Reached max iterations of {n_iters}.")
 
         if self.verbose:
             print(
@@ -258,15 +263,15 @@ class ESGVI:
                 # TODO: Should this be forced PSD?
                 # new_state_covar = jac_inv @ new_state_covar @ jac_inv.T
                 # new_state_info = jac.T @ new_state_info @ jac
-                new_state_covar = force_sym_PSD(jac_inv @ new_state_covar @ jac_inv.T)
-                new_state_info = force_sym_PSD(jac.T @ new_state_info @ jac)
+                # new_state_covar = force_sym_PSD(jac_inv @ new_state_covar @ jac_inv.T)
+                # new_state_info = force_sym_PSD(jac.T @ new_state_info @ jac)
 
                 covariance[state_slice, state_slice] = new_state_covar
                 information[state_slice, state_slice] = new_state_info
 
         #  TODO: Check this
-        covariance = force_sym(covariance)
-        information = force_sym(information)
+        covariance = force_sym_PSD(covariance)
+        information = force_sym_PSD(information)
 
         return new_states, information, covariance
 
