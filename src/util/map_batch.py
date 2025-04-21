@@ -8,10 +8,19 @@ import timeit
 
 # Navlie Imports
 from navlie.lib import VectorState, SE2State, VectorInput
-from navlie.types import  StateWithCovariance, ProcessModel, Measurement
-from navlie.lib.models import PointRelativePositionSLAM, PointRelativePosition, BodyFrameVelocity
+from navlie.types import StateWithCovariance, ProcessModel, Measurement
+from navlie.lib.models import (
+    PointRelativePositionSLAM,
+    PointRelativePosition,
+    BodyFrameVelocity,
+)
 from navlie.batch.problem import Problem
-from navlie.batch.residuals import ProcessResidual, PriorResidual, Residual, MeasurementResidual
+from navlie.batch.residuals import (
+    ProcessResidual,
+    PriorResidual,
+    Residual,
+    MeasurementResidual,
+)
 from navlie.utils import find_nearest_stamp_idx
 from pymlg.numpy.se2 import SE2, SO2
 
@@ -69,27 +78,51 @@ class PointRelativePositionResidual(Residual):
         return error
 
 
-def construct_planar_map(x0:SE2State, P0:np.ndarray, input_data:List[VectorInput], process_model:ProcessModel, meas_data=List[Measurement], pose_key_string='x', compute_covariance=True)-> Problem:
+def construct_planar_map(
+    x0: SE2State,
+    P0: np.ndarray,
+    input_data: List[VectorInput],
+    process_model: ProcessModel,
+    meas_data=List[Measurement],
+    pose_key_string="x",
+    slam=False,
+    step_tol=1e-7,
+    init_landmark: List[StateWithCovariance] = [],
+    use_landmark_prior=False,
+) -> Problem:
     x0_hat = x0.copy()
-    x0_hat.state_id = pose_key_string + '0'
+    x0_hat.state_id = pose_key_string + "0"
     init_pose_est = [x0_hat]
     x = x0_hat.copy()
-    for k in range(len(input_data)-1):
+    for k in range(len(input_data) - 1):
         u = input_data[k]
         dt = input_data[k + 1].stamp - u.stamp
         x = process_model.evaluate(x, u, dt)
         x.stamp = x.stamp + dt
-        x.state_id = pose_key_string + str(k+1)
+        x.state_id = pose_key_string + str(k + 1)
         init_pose_est.append(x.copy())
-    problem = Problem()
+    problem = Problem(step_tol=step_tol)
     for i, state in enumerate(init_pose_est):
         problem.add_variable(state.state_id, state)
-    
+
+    if slam:
+        for i, landmark in enumerate(init_landmark):
+            problem.add_variable(landmark.state.state_id, landmark.state.copy())
+
     est_stamps = [state.stamp for state in init_pose_est]
 
-    init_cov = P0 # set a small covariance since we've initialized to groundtruth
+    init_cov = np.copy(
+        P0
+    )  # set a small covariance since we've initialized to groundtruth
     prior_residual = PriorResidual(x0_hat.state_id, x0_hat.copy(), init_cov)
     problem.add_residual(prior_residual)
+    # SLAM landmark prior
+    if slam and use_landmark_prior:
+        for i, landmark in enumerate(init_landmark):
+            landmark_prior_residual = PriorResidual(
+                landmark.state.state_id, landmark.state.copy(), landmark.covariance
+            )
+            problem.add_residual(landmark_prior_residual)
     # Add process residuals
     for k in range(len(input_data) - 1):
         u = input_data[k]
@@ -116,9 +149,28 @@ def construct_planar_map(x0:SE2State, P0:np.ndarray, input_data:List[VectorInput
             [key_1],
             meas,
         )
+        if slam:
+            landmark_id = meas.model._landmark_id
+            meas.model = PointRelativePositionSLAM(
+                pose.state_id, landmark_id, R=meas.model.covariance(None)
+            )
+            key_2 = landmark_id
+            meas_residual = PointRelativePositionResidual([key_1, key_2], meas)
         problem.add_residual(meas_residual)
+
     return problem, init_pose_est
 
 
+def extract_landmark_est(
+    variables_opt, problem: Problem, init_landmarks: List[VectorState]
+):
+    landmark_results_list: List[StateWithCovariance] = []
+    for landmark in init_landmarks:
+        landmark_est = variables_opt[landmark.state_id]
+        landmark_cov = problem.get_covariance_block(
+            landmark.state_id, landmark.state_id
+        )
+        landmark_state_cov = StateWithCovariance(landmark_est, landmark_cov)
+        landmark_results_list.append(landmark_state_cov)
 
-    
+    return landmark_results_list
