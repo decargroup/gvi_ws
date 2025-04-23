@@ -21,7 +21,7 @@ from navlie.lib.states import MatrixLieGroupState, SE2State, VectorState
 from navlie.filters import generate_sigmapoints
 
 
-def test_unit_sigmapoints(method="gh"):
+def test_unit_sigmapoints(method="gh", order=3):
     key1 = "x0"
     projection = np.identity(3)
     state_list = [
@@ -36,7 +36,7 @@ def test_unit_sigmapoints(method="gh"):
         variable_slices=var_slices,
         projection=projection,
         cubature=method,
-        order=3,
+        order=order,
     )
     nav_method = method
     if method == "spherical":
@@ -79,10 +79,15 @@ def test_unit_sigmapoints(method="gh"):
         print("Navlie Dictionary:", dict_nav)
         print("My Dictionary:", dict_gvi)
 
+    m = np.zeros(3)
+    for i, w in enumerate(gvi_w):
+        m += w * gvi_sp[i]
+    print(m)
+
 
 if __name__ == "__main__":
     VERBOSE = False
-    METHOD = "gh"
-    ORDER = 3
+    METHOD = "unscented"
+    ORDER = 2
 
-    test_unit_sigmapoints(method=METHOD)
+    test_unit_sigmapoints(method=METHOD, order=ORDER)

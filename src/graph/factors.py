@@ -4,7 +4,7 @@ from typing import Hashable, List, Tuple, Dict
 import navlie as nav
 from pymlg.numpy.se2 import SE2, SO2
 from typing import Callable, Optional, List
-from src.util.cubatures import gh_cubature, spherical_cubature
+from src.util.cubatures import gh_cubature, spherical_cubature, unscented_cubature
 from navlie.lib.states import (
     VectorState,
     SE2State,
@@ -41,6 +41,9 @@ class Factor:
         elif cubature == "spherical":
             self._cubature_fun: Callable = spherical_cubature
 
+        elif cubature == "unscented":
+            self._cubature_fun: Callable = unscented_cubature
+
         else:
             raise ValueError("The field cubature must be 'gh' or 'spherical'.")
         self._order: int = order
@@ -63,7 +66,10 @@ class Factor:
         self.expect_matrix: np.ndarray = None
 
     def _gen_unit_sigma_pts(self) -> Tuple[np.ndarray, np.ndarray]:
-        return self._cubature_fun(state_dof=self._total_dof, order_p=self._order)
+        unit_sp, weights = self._cubature_fun(
+            state_dof=self._total_dof, order_p=self._order
+        )
+        return unit_sp, weights
 
     def _phi_dx(self, column_expect: np.ndarray, information: np.ndarray):
         return information @ column_expect

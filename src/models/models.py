@@ -241,7 +241,7 @@ class DoubleIntegrator(ProcessModel):
         self._Q = Q
         self.dim = Q.shape[0]
 
-    def evaluate(self, x: VectorState, u: VectorInput, dt: float) -> np.ndarray:
+    def evaluate(self, x: VectorState, u: VectorInput, dt: float) -> State:
         x_new = x.copy()
         Ad = self.jacobian(None, None, dt)
         Ld = self.input_jacobian(dt)

@@ -71,4 +71,16 @@ def spherical_cubature(state_dof: int, order_p=None):
         [[np.eye(state_dof), -np.eye(state_dof)]]
     )
     w = 1 / (2 * state_dof) * np.ones((2 * state_dof))
-    return sigma_points.T, w.T
+    return sigma_points.T, w
+
+
+def unscented_cubature(state_dof: int, order_p=None):
+    kappa = order_p
+    sigma_points = np.sqrt(state_dof + kappa) * np.block(
+        [[np.zeros((state_dof, 1)), np.eye(state_dof), -np.eye(state_dof)]]
+    )
+
+    w = 1 / (2 * (state_dof + kappa)) * np.ones((2 * state_dof + 1))
+    w[0] = kappa / (state_dof + kappa)
+
+    return sigma_points.T, w

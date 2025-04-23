@@ -2,7 +2,7 @@
 import numpy as np
 import navlie as nav
 import typing
-from typing import List
+from typing import List, Tuple
 import matplotlib.pyplot as plt
 import timeit
 
@@ -89,7 +89,7 @@ def construct_planar_map(
     step_tol=1e-7,
     init_landmark: List[StateWithCovariance] = [],
     use_landmark_prior=False,
-) -> Problem:
+) -> Tuple[Problem, List[nav.State]]:
     x0_hat = x0.copy()
     x0_hat.state_id = pose_key_string + "0"
     init_pose_est = [x0_hat]

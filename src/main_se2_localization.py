@@ -44,8 +44,8 @@ from typing import List, Tuple
 
 # %%
 if __name__ == "__main__":
-    np.random.seed(2)
-    T_END = 1.0
+    np.random.seed(7)
+    T_END = 3.0
     NOISE = True
     CUB_METHOD = "gh"
     CUB_ORDER = 3
@@ -59,12 +59,12 @@ if __name__ == "__main__":
     BACK_ITERS = 1
     INIT_STEP_SIZE = 1e0
     # Script Params
-    SAVE_FIGS = True
-    SHOW_FIGS = False
+    SAVE_FIGS = False
+    SHOW_FIGS = True
 
     # Init Prior
     x0 = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
-    P0 = np.identity(3) * 1e-2
+    P0 = np.identity(3) * 1e-3
     # Init landmarks
     landmark_positions = [[2, 1]]
     landmark_states = [
