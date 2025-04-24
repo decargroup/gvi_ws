@@ -41,7 +41,7 @@ if __name__ == "__main__":
     # MC Params
     TRIALS = 20
     # Globals
-    T_TRIAL = 5.0
+    T_TRIAL = 3.0
     CUB_METHOD = "gh"
     CUB_ORDER = 3
     STEP_TOL = 1e-8
@@ -56,9 +56,9 @@ if __name__ == "__main__":
     MAX_ITERS = 5
     # Init Prior
     x0 = VectorState(value=np.array([1, 0]), stamp=0.0, state_id="x0")
-    P0 = np.identity(2) * 1e-2
+    P0 = np.identity(2) * 1e-3
     # Init Proc model
-    Q_d = np.identity(2) * 0.2
+    Q_d = np.identity(2) * 0.1
     process_model = SingleIntegrator(Q=Q_d)
     proc_freq = 100
     # Init Meas Model

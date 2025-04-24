@@ -19,6 +19,11 @@ from src.util.psd import force_sym_PSD
 from navlie.types import State, StateWithCovariance, Measurement, Input
 from navlie.lib.states import MatrixLieGroupState, SE2State, VectorState
 from navlie.filters import generate_sigmapoints
+from src.util.cubatures import (
+    student_t_cubature,
+    unscented_cubature,
+    spherical_cubature,
+)
 
 
 def test_unit_sigmapoints(method="gh", order=3):
@@ -83,6 +88,10 @@ def test_unit_sigmapoints(method="gh", order=3):
     for i, w in enumerate(gvi_w):
         m += w * gvi_sp[i]
     print(m)
+
+
+def test_student_t_sigmapoints():
+    pass
 
 
 if __name__ == "__main__":

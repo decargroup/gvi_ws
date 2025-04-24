@@ -22,6 +22,7 @@ from navlie.batch.residuals import (
     MeasurementResidual,
 )
 from navlie.utils import find_nearest_stamp_idx
+from navlie.batch.losses import L2Loss, CauchyLoss, LossFunction
 from pymlg.numpy.se2 import SE2, SO2
 
 
@@ -85,6 +86,7 @@ def construct_planar_map(
     process_model: ProcessModel,
     meas_data=List[Measurement],
     pose_key_string="x",
+    loss_fun: LossFunction = L2Loss(),
     slam=False,
     step_tol=1e-7,
     init_landmark: List[StateWithCovariance] = [],
@@ -156,7 +158,7 @@ def construct_planar_map(
             )
             key_2 = landmark_id
             meas_residual = PointRelativePositionResidual([key_1, key_2], meas)
-        problem.add_residual(meas_residual)
+        problem.add_residual(meas_residual, loss=loss_fun)
 
     return problem, init_pose_est
 

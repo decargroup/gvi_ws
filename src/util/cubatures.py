@@ -84,3 +84,16 @@ def unscented_cubature(state_dof: int, order_p=None):
     w[0] = kappa / (state_dof + kappa)
 
     return sigma_points.T, w
+
+
+def student_t_cubature(state_dof: int, order_p=None):
+    dof_param = 4
+    kappa = -1
+    d_x = state_dof
+    w = 1 / (2 * (d_x + kappa)) * np.ones((2 * state_dof) + 1)
+    w[0] = kappa / (d_x + kappa)
+    sigma_points = np.sqrt((dof_param / (dof_param - 2))(d_x + kappa)) * np.block(
+        [[np.zeros((d_x, 1)), np.identity(d_x), -1 * np.identity(d_x)]]
+    )
+
+    return sigma_points.T, w

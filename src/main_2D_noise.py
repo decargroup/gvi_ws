@@ -34,10 +34,11 @@ from src.util.data_generation import DataGenerator
 from navlie.lib.states import SE2State, VectorState
 from navlie.types import StateWithCovariance
 from navlie.lib.models import SingleIntegrator, RangePointToAnchor
+from navlie.batch.losses import L2Loss, CauchyLoss
 
 if __name__ == "__main__":
     np.random.seed(1)
-    T_END = 3.0
+    T_END = 2.0
     LINEAR = False
     STEREO = True
     NOISE = True
@@ -51,23 +52,24 @@ if __name__ == "__main__":
     VERBOSE = True
     MAX_ITERS = 10
     BACK_ITERS = 10
-    INIT_STEP_SIZE = 1e0
+    INIT_STEP_SIZE = 1e-10
     # Noise Params
     PROC_NOISE = "gaussian"
-    MEAS_NOISE = "student_t"
+    MEAS_NOISE = "gaussian"
+    LOSS_FUN = L2Loss()
     # Script Params
-    SAVE_FIGS = True
+    SAVE_FIGS = False
     SHOW_FIGS = True
 
     # Init Prior
     x0 = VectorState(value=np.array([1, 0]), stamp=0.0, state_id="x0")
-    P0 = np.identity(2) * 1e-2
+    P0 = np.identity(2) * 1e-3
     # Init Proc model
-    Q_d = np.identity(2) * 0.2
+    Q_d = np.identity(2) * 0.1
     process_model = SingleIntegrator(Q=Q_d)
     proc_freq = 100
     # Init Meas Model
-    R_d = np.identity(1) * 1e-1
+    R_d = np.identity(1) * 1e-3
     anchor = [0, 4]
     meas_model = RangePointToAnchor(anchor_position=anchor, R=R_d)
     meas_freq = 10
@@ -124,6 +126,7 @@ if __name__ == "__main__":
         input_data=input_data_heavy,
         process_model=process_model,
         meas_data=meas_data_heavy,
+        loss_fun=LOSS_FUN,
         slam=False,
         step_tol=STEP_TOL,
     )
@@ -157,16 +160,21 @@ if __name__ == "__main__":
     results_map = nav.GaussianResultList.from_estimates(est_list_map, gt_list)
 
     # ESGVI Setup
-    esgvi_graph = generate_trajectory(
-        x0_state.copy(),
-        P0=P0.copy(),
-        init_info_matrix=esgvi_init_info,
-        input_data=input_data_heavy,
-        meas_data=meas_data_heavy,
-        process_model=process_model,
-        cubature=CUB_METHOD,
-        cubature_order=CUB_ORDER,
-    )
+    if MAP_INIT:
+        esgvi_graph = esgvi_from_map(
+            map_problem=problem, cubature_method=CUB_METHOD, cubature_order=CUB_ORDER
+        )
+    else:
+        esgvi_graph = generate_trajectory(
+            x0_state.copy(),
+            P0=P0.copy(),
+            init_info_matrix=esgvi_init_info,
+            input_data=input_data_heavy,
+            meas_data=meas_data_heavy,
+            process_model=process_model,
+            cubature=CUB_METHOD,
+            cubature_order=CUB_ORDER,
+        )
     esgvi_graph.verbose = VERBOSE
     esgvi_graph.max_iters = MAX_ITERS
     esgvi_graph.backtrack_iters = BACK_ITERS
