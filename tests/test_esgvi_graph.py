@@ -125,7 +125,7 @@ def test_build_graph(end_time, noise=True, verbose=False, method="gh", order=3):
         input_data=input_data_lim,
         meas_data=meas_data_lim,
         process_model=proc_model,
-        cubature=CUB_METHOD,
+        proc_cubature=CUB_METHOD,
         cubature_order=CUB_ORDER,
     )
     print("-----------------\nSizing Test: ")

@@ -48,25 +48,28 @@ from typing import List, Tuple
 if __name__ == "__main__":
     np.random.seed(1)
     # MC Params
-    TRIALS = 2
+    TRIALS = 10
     # Globals
-    T_TRIAL = 0.2
+    T_TRIAL = 2
     CUB_METHOD = "gh"
     CUB_ORDER = 3
     STEP_TOL = 1e-8
     BACK_ITERS = 1
     INIT_STEP_SIZE = 1e0
-    SAVE_FIGS = False
+    SAVE_FIGS = True
+    MEAS_MODEL = "rel_pos"
 
     # ESGVI Params
     MAX_ITERS = 5
 
     # Trajectory Vals
-    X0_TRUE = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
+    X0_TRUE_GVI = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
+    X0_TRUE_MAP = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
     P0 = np.identity(3) * 1e-3
 
     # Init landmarks
-    landmark_positions = [[2, 1]]
+    landmark_positions = [[2, 1], [0, 1], [2, 0]]
+    num_landmarks = len(landmark_positions)
     landmark_states = [
         VectorState(landmark, state_id=f"l{i}")
         for i, landmark in enumerate(landmark_positions)
@@ -75,20 +78,22 @@ if __name__ == "__main__":
     Q_d = np.identity(3) * 0.2
     proc_model = BodyFrameVelocity(Q=Q_d)
     proc_model_freq = 100
-
     # Meas Model
-    # R_d = np.identity(2) * 1e-1
-    # meas_models_gen = [
-    #     PointRelativePosition(
-    #         landmark_position=np.array([l.value]), R=R_d, landmark_id="l0"
-    #     )
-    #     for l in landmark_states
-    # ]
-    R_d = np.identity(1) * 1e-1
+    if MEAS_MODEL == "range":
+        R_d = np.identity(1) * 1e-1
 
-    meas_models_gen = [
-        RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
-    ]
+        meas_models_gen = [
+            RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
+        ]
+    elif MEAS_MODEL == "rel_pos":
+        R_d = np.identity(2) * 1e-1
+        meas_models_gen = [
+            PointRelativePosition(
+                landmark_position=np.array([l.value]), R=R_d, landmark_id="l0"
+            )
+            for l in landmark_states
+        ]
+    
     meas_model_freq = 10
 
     # Input Profile
@@ -101,16 +106,17 @@ if __name__ == "__main__":
         Q_d,
         input_freq=proc_model_freq,
         meas_model_list=meas_models_gen,
-        meas_freq_list=[meas_model_freq] * len(meas_models_gen),
+        meas_freq_list=meas_model_freq,
     )
 
     def run_esgvi_trial(trial_num: int) -> nav.GaussianResultList:
         np.random.seed(trial_num)
+        # print("ESGVI: ", trial_num)
         gt_data, input_data, meas_data = dg.generate(
-            X0_TRUE.copy(), start=0.0, stop=T_TRIAL, noise=True
+            X0_TRUE_GVI.copy(), start=0.0, stop=T_TRIAL, noise=True
         )
-        x0_check = X0_TRUE.plus(nav.randvec(P0))
-        problem, init_pose_est = construct_planar_map(
+        x0_check = X0_TRUE_GVI.plus(nav.randvec(P0))
+        gvi_problem, init_pose_est = construct_planar_map(
             x0=x0_check.copy(),
             P0=np.copy(P0),
             input_data=input_data,
@@ -120,9 +126,9 @@ if __name__ == "__main__":
             step_tol=STEP_TOL,
         )
         # Initialize ESGVI information
-        problem.variables = {k: v.copy() for k, v in problem.variables_init.items()}
-        problem._compute_size_of_problem()
-        _, H, _ = problem.compute_error_jac_cost()
+        gvi_problem.variables = {k: v.copy() for k, v in gvi_problem.variables_init.items()}
+        gvi_problem._compute_size_of_problem()
+        _, H, _ = gvi_problem.compute_error_jac_cost()
         esgvi_init_info: np.ndarray = (H.T @ H).copy()
         # Create ESGVI Graph
         esgvi_graph = generate_trajectory(
@@ -132,7 +138,7 @@ if __name__ == "__main__":
             input_data=input_data,
             meas_data=meas_data,
             process_model=proc_model,
-            cubature=CUB_METHOD,
+            proc_cubature=CUB_METHOD,
             cubature_order=CUB_ORDER,
         )
         esgvi_graph.verbose = False
@@ -162,10 +168,11 @@ if __name__ == "__main__":
 
     def run_map_trial(trial_num: int) -> nav.GaussianResultList:
         np.random.seed(trial_num)
+        # print("MAP: ", trial_num)
         gt_data, input_data, meas_data = dg.generate(
-            X0_TRUE.copy(), start=0.0, stop=T_TRIAL, noise=True
+            X0_TRUE_MAP.copy(), start=0.0, stop=T_TRIAL, noise=True
         )
-        x0_check = X0_TRUE.plus(nav.randvec(P0))
+        x0_check = X0_TRUE_MAP.plus(nav.randvec(P0))
         problem, init_pose_est = construct_planar_map(
             x0=x0_check.copy(),
             P0=np.copy(P0),
@@ -205,7 +212,7 @@ if __name__ == "__main__":
 
     results_gvi = monte_carlo(run_esgvi_trial, num_trials=TRIALS, num_jobs=4)
     results_gvi_list = results_gvi.trial_results
-
+    # %%
     import matplotlib.pyplot as plt
 
     # Plotting parameters
@@ -215,17 +222,18 @@ if __name__ == "__main__":
     plt.rc("axes", grid=True)
     plt.rc("grid", linestyle="--")
 
-    fig_map, ax_map = nav.plot_nees(
-        results=results_map, confidence_interval=0.997, label="MAP"
+    fig, ax = nav.plot_nees(
+        results=results_map, confidence_interval=0.997, label="MAP",
     )
     fig, ax = nav.plot_nees(
-        results=results_gvi, ax=ax_map, confidence_interval=0.997, label="ESGVI"
+        results=results_gvi, ax=ax, confidence_interval=0.997, label="ESGVI"
     )
+    ax.set_ylabel(r"Mahalanobis Distance, $d^2_k$")
     ax.set_xlabel("Time (s)")
-    ax.set_title("NEES")
+    ax.set_title(f"aNEES {TRIALS} trials for {num_landmarks} landmarks.")
     if SAVE_FIGS:
         plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_aNEES_{TRIALS}_{T_TRIAL}s.pdf"
+            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_aNEES_{MEAS_MODEL}_{TRIALS}_{T_TRIAL}s.pdf"
         )
     plt.show()
 
@@ -270,3 +278,7 @@ if __name__ == "__main__":
             f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_rmse_{TRIALS}_{T_TRIAL}s.pdf"
         )
     plt.show()
+
+    
+
+# %%

@@ -49,6 +49,16 @@ def randvec(
         return L @ np.random.standard_t(
             df=cov.shape[0], size=(cov.shape[0], num_samples)
         )
+    elif method == 'skew_laplace':
+        # ~ Gamma(1,2)
+        beta = np.random.gamma(shape=1, scale=2, size=num_samples) 
+        mu = 0
+        lam = 0.1
+        sigma = L[0,0]
+        if max(L.shape)>1:
+            raise NotImplementedError("Multivariate skew_laplace noise not implemented yet.")
+        z = np.random.normal(loc=mu + beta * lam, scale=np.sqrt(beta) * sigma)
+        return np.atleast_2d(z)
     else:
         raise NotImplementedError("Implement non-gaussian random vector")
 
@@ -148,13 +158,13 @@ class DataGenerator:
             raise ValueError(
                 "Offsets should be provided as a float or a list of floats."
             )
-        supported_noise_types = ["gaussian", "student_t", "cauchy"]
+        supported_noise_types = ["gaussian", "student_t", "cauchy", "skew_laplace"]
         if (
             process_noise_type not in supported_noise_types
             or measurement_noise_type not in supported_noise_types
         ):
             raise ValueError(
-                'Only "gaussian", "cauchy" or "student_t" noise types are supported.'
+                'Only "gaussian", "cauchy", "student_t" or "skew_laplace" noise types are supported.'
             )
         self.process_noise_type = process_noise_type
         self.measurement_noise_type = measurement_noise_type

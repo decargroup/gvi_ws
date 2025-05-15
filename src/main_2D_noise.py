@@ -42,7 +42,8 @@ if __name__ == "__main__":
     LINEAR = False
     STEREO = True
     NOISE = True
-    CUB_METHOD = "gh"
+    CUB_METHOD_PROC = "gh"
+    CUB_METHOD_MEAS = "gh"
     CUB_ORDER = 3
     MAP_INIT = False
     TIME_IT = False
@@ -52,11 +53,11 @@ if __name__ == "__main__":
     VERBOSE = True
     MAX_ITERS = 10
     BACK_ITERS = 10
-    INIT_STEP_SIZE = 1e-10
+    INIT_STEP_SIZE = 1e0
     # Noise Params
     PROC_NOISE = "gaussian"
-    MEAS_NOISE = "gaussian"
-    LOSS_FUN = L2Loss()
+    MEAS_NOISE = "skew_laplace"
+    LOSS_FUN = CauchyLoss()
     # Script Params
     SAVE_FIGS = False
     SHOW_FIGS = True
@@ -128,7 +129,7 @@ if __name__ == "__main__":
         meas_data=meas_data_heavy,
         loss_fun=LOSS_FUN,
         slam=False,
-        step_tol=STEP_TOL,
+        step_tol=STEP_TOL,  
     )
     # Initialize ESGVI information
     problem.variables = {k: v.copy() for k, v in problem.variables_init.items()}
@@ -162,7 +163,7 @@ if __name__ == "__main__":
     # ESGVI Setup
     if MAP_INIT:
         esgvi_graph = esgvi_from_map(
-            map_problem=problem, cubature_method=CUB_METHOD, cubature_order=CUB_ORDER
+            map_problem=problem, cubature_method=CUB_METHOD_PROC, cubature_order=CUB_ORDER
         )
     else:
         esgvi_graph = generate_trajectory(
@@ -172,7 +173,7 @@ if __name__ == "__main__":
             input_data=input_data_heavy,
             meas_data=meas_data_heavy,
             process_model=process_model,
-            cubature=CUB_METHOD,
+            proc_cubature=CUB_METHOD_PROC,
             cubature_order=CUB_ORDER,
         )
     esgvi_graph.verbose = VERBOSE

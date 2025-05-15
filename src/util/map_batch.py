@@ -25,7 +25,6 @@ from navlie.utils import find_nearest_stamp_idx
 from navlie.batch.losses import L2Loss, CauchyLoss, LossFunction
 from pymlg.numpy.se2 import SE2, SO2
 
-
 # Define the measurement residual, which links a robot state to a landmark
 class PointRelativePositionResidual(Residual):
     def __init__(

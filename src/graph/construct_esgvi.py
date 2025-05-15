@@ -27,7 +27,8 @@ def generate_trajectory(
     input_data: List[Input],
     meas_data: List[Measurement],
     process_model: ProcessModel,
-    cubature: str = "gh",
+    proc_cubature: str = "gh",
+    meas_cubature: str = "gh",
     cubature_order: int = 3,
     init_landmark: List[State] = None,
     P0_lanmdark: np.ndarray = None,
@@ -79,7 +80,7 @@ def generate_trajectory(
         prior_covariance=P0.copy(),
         variable_slices=state_slices,
         projection=prior_proj,
-        cubature=cubature,
+        cubature=meas_cubature,
         order=cubature_order,
     )
     esgvi_graph.add_factor(prior_factor)
@@ -97,7 +98,7 @@ def generate_trajectory(
             input=u,
             variable_slices=state_slices,
             projection=process_proj,
-            cubature=cubature,
+            cubature=proc_cubature,
             order=cubature_order,
         )
         esgvi_graph.add_factor(process_factor)
@@ -115,7 +116,7 @@ def generate_trajectory(
             measurement=meas,
             variable_slices=state_slices,
             projection=meas_proj,
-            cubature=cubature,
+            cubature=meas_cubature,
             order=cubature_order,
         )
         esgvi_graph.add_factor(meas_factor)

@@ -130,7 +130,7 @@ if __name__ == "__main__":
             input_data=input_data,
             meas_data=meas_data,
             process_model=proc_model,
-            cubature=CUB_METHOD,
+            proc_cubature=CUB_METHOD,
             cubature_order=CUB_ORDER,
         )
         esgvi_graph.verbose = False

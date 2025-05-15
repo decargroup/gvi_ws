@@ -1,3 +1,4 @@
+# %%
 import numpy as np
 import scipy as sp
 import navlie as nav
@@ -69,31 +70,108 @@ def gh_cubature(state_dof, order_p):
 def spherical_cubature(state_dof: int, order_p=None):
     sigma_points = np.sqrt(state_dof) * np.block(
         [[np.eye(state_dof), -np.eye(state_dof)]]
-    )
+    ).astype(dtype=np.float64)
     w = 1 / (2 * state_dof) * np.ones((2 * state_dof))
     return sigma_points.T, w
 
 
 def unscented_cubature(state_dof: int, order_p=None):
-    kappa = order_p
-    sigma_points = np.sqrt(state_dof + kappa) * np.block(
-        [[np.zeros((state_dof, 1)), np.eye(state_dof), -np.eye(state_dof)]]
-    )
+    if state_dof <= 3:
+        kappa = 2
+        sigma_points = np.sqrt(state_dof + kappa) * np.block(
+            [[np.zeros((state_dof, 1)), np.eye(state_dof), np.diag(-1*np.ones(state_dof))]]
+        )
 
-    w = 1 / (2 * (state_dof + kappa)) * np.ones((2 * state_dof + 1))
-    w[0] = kappa / (state_dof + kappa)
+        w = 1 / (2 * (state_dof + kappa)) * np.ones((2 * state_dof + 1))
+        w[0] = kappa / (state_dof + kappa)
+    else:
+        kappa = 2
+        sigma_points = np.sqrt(state_dof) * np.block(
+            [[np.eye(state_dof), np.diag(-1*np.ones(state_dof))]]
+        )
+        w = 1 / (2 * state_dof) * np.ones((2*state_dof))
+    
 
     return sigma_points.T, w
 
+def transform_matrix(state_dof: int):
+    B = np.zeros((state_dof, state_dof))
+    for k in range(1, state_dof +1):
+        for r in range(1, (state_dof//2) + 1):
+            B[2*r - 2, k - 1] = np.sqrt(2 / state_dof) * np.cos((2*r - 1) * (k) * np.pi / state_dof)
+            B[2*r - 1, k-1] = np.sqrt(2 / state_dof) * np.sin((2*r - 1) * (k) * np.pi / state_dof)
+        if state_dof % 2 ==1:
+            B[-1, k - 1] = (-1)**k / np.sqrt(state_dof)
+    
+    B[np.abs(B) < np.finfo(B.dtype).eps] = 0.0
+    return B
 
-def student_t_cubature(state_dof: int, order_p=None):
-    dof_param = 4
-    kappa = -1
+def trans_spherical_cubature(state_dof: int, order_p = None):
+    B = transform_matrix(state_dof)
+    sp_sph, w = spherical_cubature(state_dof)
+    sp_sph_trans = B @ sp_sph.T
+    return sp_sph_trans.T, w
+
+def trans_unscented_cubature(state_dof: int, order_p = None):
+    B = transform_matrix(state_dof)
+    sp_sph, w = unscented_cubature(state_dof)
+    sp_sph_trans = B @ sp_sph.T
+    return sp_sph_trans.T, w
+
+def trans_gh_cubature(state_dof: int, order_p:int = 3):
+    B = transform_matrix(state_dof)
+    sp_gh, w = gh_cubature(state_dof, order_p)
+    sp_gh_trans = B @ sp_gh.T
+    return sp_gh_trans.T, w
+
+def student_t_cubature(state_dof: int, order_p=None):  
     d_x = state_dof
-    w = 1 / (2 * (d_x + kappa)) * np.ones((2 * state_dof) + 1)
-    w[0] = kappa / (d_x + kappa)
-    sigma_points = np.sqrt((dof_param / (dof_param - 2))(d_x + kappa)) * np.block(
-        [[np.zeros((d_x, 1)), np.identity(d_x), -1 * np.identity(d_x)]]
-    )
+    if order_p == 3:
+        kappa = 1
+        dof_param = 11.2915
+        w = 1 / (2 * (d_x + kappa)) * np.ones((2 * state_dof) + 1)
+        w[0] = kappa / (d_x + kappa)
+        s = np.sqrt((dof_param / (dof_param - 2)) * (d_x + kappa))
+        sigma_points = s * np.block(
+            [[np.zeros((d_x, 1)), np.identity(d_x), -1 * np.identity(d_x)]]
+        )
 
-    return sigma_points.T, w
+        return sigma_points.T, w
+    elif order_p == 5:
+        kappa = 3
+        dof_param = 1e8
+        num_sp = int(2 * (d_x + (factorial(d_x) / factorial(d_x - 2))) + 1)
+        I_2 = dof_param / (dof_param - 2)
+        I_4 = 3 * dof_param**2 / ((dof_param - 2) * (dof_param - 4))
+        I_22 = dof_param**2 / ((dof_param - 2) * (dof_param - 4))
+        s = np.sqrt(I_4 / I_2)
+        w = np.ones((num_sp))
+        w[0] = 1 - (d_x * (I_2 / I_4) ** 2)
+        w[1 : 2 * d_x + 1] = (
+            0.5
+            * (I_2 / I_4) ** 2
+            * (I_4 - (d_x - 1) * I_22)
+            * np.ones_like(w[1 : 2 * d_x + 1])
+        )
+        w[2 * d_x + 1 :] = (
+            0.25 * (I_2 / I_4) ** 2 * I_22 * np.ones_like(w[2 * d_x + 1 :])
+        )
+        sigma_points = sigma_points = s * np.block(
+            [
+                [
+                    np.zeros((d_x, 1)),
+                    np.identity(d_x),
+                    -1 * np.identity(d_x),
+                    np.zeros((d_x, num_sp - 1 - 2 * d_x)),
+                ]
+            ]
+        )
+        count = 2 * d_x + 1
+        for x in itertools.product([s, -s], repeat=d_x):
+            sigma_points[:, count] = np.array([x])
+            count += 1
+        return sigma_points.T, w
+# %%
+if __name__=="__main__":
+    B = trans_spherical_cubature(state_dof=2)
+# %%

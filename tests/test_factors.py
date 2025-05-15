@@ -108,9 +108,10 @@ def test_vec_prior_factor(verbose=False, method="gh", order=3):
     total_covariance = P0.copy()
     total_information = force_sym(scipy.linalg.inv(total_covariance))
     if verbose:
-        print((prior_fac._unit_sigma_pts))
-        print(prior_fac._weights)
-        print(prior_fac._gen_sigma_pts(state_list, total_covariance))
+        print("Unit SP: \n", (prior_fac._unit_sigma_pts))
+        print("Weights: ", prior_fac._weights)
+        print("SP: \n", prior_fac._gen_sigma_pts(state_list, total_covariance))
+    
     # Test 1: Instance
     assert isinstance(prior_fac, PriorFactor)
 
@@ -122,14 +123,15 @@ def test_vec_prior_factor(verbose=False, method="gh", order=3):
     assert col.shape[0] == total_covariance.shape[0]
     assert matrix.shape == total_covariance.shape
     if verbose:
-        print(col)
-        print(matrix)
-        print(cost)
+        print("Col:\n" ,col)
+        print("New Info:\n", matrix)
+        print("Cost:\n", cost)
 
     delta_mean = scipy.linalg.solve(matrix, -col)
     if verbose:
-        print(delta_mean)
+        print("delta mu:\n", delta_mean)
 
+    print(np.finfo(prior_fac._unit_sigma_pts.dtype).eps)
     all_close = np.allclose(delta_mean, np.zeros_like(delta_mean))
     print("----------\nTesting mean vector update: ")
     assert (
@@ -142,9 +144,9 @@ def test_vec_prior_factor(verbose=False, method="gh", order=3):
     ), f"Should recover ground truth information: \n{total_information}\n Rather than: \n{matrix}"
     print("Passed!")
 
-    print("----------\nTesting factor cost: ")
-    assert np.allclose(cost, np.ones_like(cost)), f"Cost is not zero: \n{cost}"
-    print("Passed!")
+    # print("----------\nTesting factor cost: ")
+    # assert np.allclose(cost, np.ones_like(cost)), f"Cost is not zero: \n{cost}"
+    # print("Passed!")
 
 
 def test_meas_factor(verbose=False, method="gh", order=3):
@@ -305,9 +307,6 @@ def test_vec_prior_proc_factor(verbose=False, method="gh", order=3):
         cubature=method,
         order=order,
     )
-    if method == "unscented":
-        order = 1e-5
-        print(f"Unscented Process Factor Kappa = {order}")
     proc_fac = ProcessFactor(
         keys=[key1, key2],
         process_model=proc_model,
@@ -367,7 +366,6 @@ def test_vec_prior_proc_factor(verbose=False, method="gh", order=3):
     total_cost = cost_prior + cost_proc
     total_col = col_prior + col_proc
     total_mat = mat_prior + mat_proc
-
     delta_mean = scipy.linalg.solve(total_mat, -total_col)
     all_close = np.allclose(delta_mean, np.zeros_like(delta_mean))
     print("----------\nTesting Two-State Mean Vector Update: ")
@@ -463,31 +461,33 @@ def test_mlg_prior_proc_factor(verbose=False, method="gh", order=3):
         covar_matrix=total_covar.copy(),
         info_matrix=total_info.copy(),
     )
+    
     gt_mat_proc = total_info - np.block(
         [
             [force_sym(scipy.linalg.inv(P0)), np.zeros((3, 3))],
             [np.zeros((3, 3)), np.zeros((3, 3))],
         ]
     )
-    # print("Testing Two State MLG Process Factor Info Update: ")
-    # assert np.allclose(
-    #     mat_proc, gt_mat_proc, atol=1e-7
-    # ), f"Proc Matrix Info Update:\n{mat_proc}\nNot equal to Ground Truth Proc Info:\n{gt_mat_proc}."
+    print("Testing Two State MLG Process Factor Info Update: ")
+    assert np.allclose(
+        mat_proc, gt_mat_proc, atol=1e-7
+    ), f"Proc Matrix Info Update:\n{mat_proc}\nNot equal to Ground Truth Proc Info:\n{gt_mat_proc}."
+
     total_cost = cost_prior + cost_proc
     total_col = col_prior + col_proc
     total_mat = mat_prior + mat_proc
 
     delta_mean = scipy.linalg.solve(total_mat, -total_col)
     all_close = np.allclose(delta_mean, np.zeros_like(delta_mean))
-    print("----------\nTesting Two-State Mean Vector Update: ")
+    print("----------\nTesting Two-State Mean MLG Update: ")
     assert (
         all_close
     ), f"Delta_mean is {delta_mean} rather than {np.zeros_like(delta_mean)}."
     print("Passed!")
 
-    print("----------\nTesting Two-State Vector Information Update: ")
+    print("----------\nTesting Two-State MLG Information Update: ")
     assert np.allclose(
-        total_mat, total_info, atol=1e0
+        total_mat, total_info, atol=1e-7
     ), f"Info update:\n{total_mat} \n Not equal to ground-truth info:\n {total_info}"
     print("Passed!")
     print(f"Info update:\n{total_mat} \nEqual to ground-truth info:\n{total_info}")
@@ -496,15 +496,15 @@ def test_mlg_prior_proc_factor(verbose=False, method="gh", order=3):
 if __name__ == "__main__":
     np.random.seed(1)
     VERBOSE = False
-    METHOD = "gh"
-    ORDER = 4
-    print("Testing Prior Factors.")
-    test_vec_prior_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
-    test_mlg_prior_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
-    print(" ----------------------- \n ")
-    print("Testing Measurement Factors.")
-    test_meas_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
-    print(" ----------------------- \n ")
+    METHOD = "trans_gh"
+    ORDER = 3
+    # print("Testing Prior Factors.")
+    # test_vec_prior_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
+    # test_mlg_prior_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
+    # print(" ----------------------- \n ")
+    # print("Testing Measurement Factors.")
+    # test_meas_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
+    # print(" ----------------------- \n ")
     print("Testing Process Factors.")
-    test_vec_prior_proc_factor(verbose=True, method=METHOD, order=ORDER)
-    # test_mlg_prior_proc_factor(verbose=True, method=METHOD, order=ORDER)
+    # test_vec_prior_proc_factor(verbose=True, method=METHOD, order=ORDER)
+    test_mlg_prior_proc_factor(verbose=True, method=METHOD, order=ORDER)

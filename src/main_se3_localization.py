@@ -45,14 +45,14 @@ from typing import List, Tuple
 # %%
 if __name__ == "__main__":
     np.random.seed(0)
-    T_END = 2.0
+    T_END = 0.1
     NOISE = True
     CUB_METHOD_PROC = "trans_gh"
     CUB_METHOD_MEAS = "trans_gh"
     CUB_ORDER = 3
     MAP_INIT = False
     TIME_IT = False
-    STEP_TOL = 1e-8
+    STEP_TOL = 1e-6
     # ESGVI params
     BACKTRACK = False
     VERBOSE = True
@@ -63,56 +63,31 @@ if __name__ == "__main__":
     SAVE_FIGS = False
     SHOW_FIGS = True
 
-    # Init Prior
-    x0 = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
-    P0 = np.identity(3) * 1e-3
-    # Init landmarks
-    landmark_positions = [[2, 1], [0, 1], [2, 0]]
+    # Data
+    data = nav.lib.SimulatedPoseRangingDataset(t_end=T_END)
+    gt_poses = data.get_ground_truth()
+    input_data = data.get_input_data()
+    meas_data = data.get_measurement_data()
+    proc_model = data.process_model
+    
+    x0 = gt_poses[0]
+    x0_state = x0.copy()
+    P0 = np.diag([0.1**2, 0.1**2, 0.1**2, 0.1**2, 0.1**2, 0.1**2])
+    
+    # If limit on poses wanted
+    gt_data_lim = gt_poses[:]
+    input_data_lim = input_data[:]
+    meas_data_lim = meas_data[:][0:3]
+    
+    
+    # Landmarks data
+    landmark_vals = [[1, 0, 0], [1, 0, 0], [-1, 0, 0], [-1, 0, 0], [0, 2, 0], [0, 2, 0], [0, 2, 2], [0, 2, 2]]
     landmark_states = [
         VectorState(landmark, state_id=f"l{i}")
-        for i, landmark in enumerate(landmark_positions)
+        for i, landmark in enumerate(landmark_vals)
     ]
-    # Init models
-    Q_d = np.identity(3) * 0.2
-    proc_model = BodyFrameVelocity(Q=Q_d)
-    proc_model_freq = 100
-
-    # Meas Model
-    R_d = np.identity(2) * 1e-2
-    meas_models_gen = [
-        PointRelativePosition(
-            landmark_position=np.array([l.value]), R=R_d, landmark_id="l0"
-        )
-        for l in landmark_states
-    ]
-    # R_d = np.identity(1) * 1e-2
-    # meas_models_gen = [
-    #     RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
-    # ]
-    meas_model_freq = 10
-
-    # Input Profile
-    input_profile = lambda t, x: np.array([np.cos(0.1 * t), 1.0, 0])
-
-    # Data Generation
-    dg = nav.DataGenerator(
-        proc_model,
-        input_profile,
-        Q_d,
-        input_freq=proc_model_freq,
-        meas_model_list=meas_models_gen,
-        meas_freq_list=[meas_model_freq] * len(meas_models_gen),
-    )
-    gt_poses, input_data, meas_data = dg.generate(
-        x0.copy(), start=0.0, stop=T_END, noise=NOISE
-    )
-    # If limit on poses wanted
-    input_data_lim = input_data[:]
-    meas_data_lim = meas_data[:]
-    gt_data_lim = gt_poses[:]
-
-    if NOISE:
-        x0_state = x0.plus(nav.randvec(P0))
+    # if NOISE:
+    #     x0_state = x0.plus(nav.randvec(P0))
 
     # MAP Computation
     print("Starting MAP Estimation")
@@ -210,7 +185,7 @@ if __name__ == "__main__":
         gt_list.append(gt_data_lim[match[1]])
 
     results_gvi = nav.GaussianResultList.from_estimates(est_list_gvi, gt_list)
-
+    # %%
     #####################
     ##### PLOT GVI ######
     #####################
@@ -222,43 +197,8 @@ if __name__ == "__main__":
     plt.rc("grid", linestyle="--")
 
     fig, ax = nav.plot_error(results_map, label="MAP")
-    ax[0].set_ylabel(r"$\theta$ (rad)")
-    ax[0].plot(
-        results_gvi.stamp, results_gvi.error[:, 0], label="ESGVI", linestyle="--"
-    )
-    ax[0].fill_between(
-        results_gvi.stamp,
-        results_gvi.three_sigma[:, 0],
-        -results_gvi.three_sigma[:, 0],
-        alpha=0.1,
-        color="orange",
-    )
-    ax[1].set_ylabel(r"$x$ (m)")
-    ax[1].plot(
-        results_gvi.stamp, results_gvi.error[:, 1], label="ESGVI", linestyle="--"
-    )
-    ax[1].fill_between(
-        results_gvi.stamp,
-        results_gvi.three_sigma[:, 1],
-        -results_gvi.three_sigma[:, 1],
-        alpha=0.1,
-        color="orange",
-    )
-    ax[2].set_ylabel(r"$y$ (m)")
-    ax[2].plot(
-        results_gvi.stamp, results_gvi.error[:, 2], label="ESGVI", linestyle="--"
-    )
-    ax[2].fill_between(
-        results_gvi.stamp,
-        results_gvi.three_sigma[:, 2],
-        -results_gvi.three_sigma[:, 2],
-        alpha=0.1,
-        color="orange",
-    )
-    ax[1].set_xlabel("Time (s)")
-    ax[0].legend(loc="upper right")
-    ax[1].legend()
-    ax[2].legend()
+    fig, ax = nav.plot_error(results_gvi, axs=ax, label="ESGVI")
+    plt.legend()
     plt.tight_layout()
     if SAVE_FIGS:
         plt.savefig(
@@ -268,11 +208,14 @@ if __name__ == "__main__":
         plt.show()
 
     # Poses Plot
-    fig, ax = nav.plot_poses(poses=pose_list_map, step=100, label="MAP")
-    fig, ax = nav.plot_poses(pose_list_gvi, step=100, ax=ax, label="ESGVI")
-    fig, ax = nav.plot_poses(poses=gt_data_lim, ax=ax, step=None, label="Ground Truth")
-    for l in landmark_states:
-        ax.plot(l.value[0], l.value[1], "x")
+    fig, ax = nav.plot_poses(poses=pose_list_map, step=100, label="MAP", arrow_length=0.01, line_color='tab:blue')
+    fig, ax = nav.plot_poses(pose_list_gvi, step=100, ax=ax, label="ESGVI", arrow_length=0.01,  line_color='tab:orange')
+    fig, ax = nav.plot_poses(poses=gt_data_lim, ax=ax, step=None, label="Ground Truth", line_color="tab:green")
+    
+    ax.set_xlim(left=-0.1, right=0.5)
+    ax.set_ylim(bottom=0)
+    # for l in landmark_states:
+    #     ax.plot(l.value[0], l.value[1], "x")
     ax.set_title("Estimated poses")
     ax.set_xlabel(r"$x$ (m)")
     ax.set_ylabel(r"$y$ (m)")
@@ -301,13 +244,13 @@ if __name__ == "__main__":
 
     # Comparison table
     print("Average Error: ")
-    print(" Method | Heading  |    X    |   Y ")
+    print(r" Method | $\phi_1$  | $\phi_2$  | $\phi_3$  |   X    |   Y   |   Z ")
     print("----------------------------------------")
     print(
-        f" ESGVI  | {np.mean(results_gvi.error[:,0]):.5f} | {np.mean(results_gvi.error[:,1]):.5f} | {np.mean(results_gvi.error[:,2]):.5f}"
+        f" ESGVI  | {np.mean(results_gvi.error[:,0]):.5f} | {np.mean(results_gvi.error[:,1]):.5f} | {np.mean(results_gvi.error[:,2]):.5f} | {np.mean(results_gvi.error[:,3]):.5f} | {np.mean(results_gvi.error[:,4]):.5f} | {np.mean(results_gvi.error[:,5]):.5f}"
     )
     print(
-        f" MAP    | {np.mean(results_map.error[:,0]):.5f} | {np.mean(results_map.error[:,1]):.5f} | {np.mean(results_map.error[:,2]):.5f}"
+        f" ESGVI  | {np.mean(results_map.error[:,0]):.5f} | {np.mean(results_map.error[:,1]):.5f} | {np.mean(results_map.error[:,2]):.5f} | {np.mean(results_map.error[:,3]):.5f} | {np.mean(results_map.error[:,4]):.5f} | {np.mean(results_map.error[:,5]):.5f}"
     )
     print(" -------------------------- ")
     print(f"Total degrees of freedom x: {esgvi_graph._graph_total_dof}")

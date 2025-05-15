@@ -50,11 +50,12 @@ from typing import List, Tuple
 # %%
 if __name__ == "__main__":
     np.random.seed(1)
-    T_END = 3.0
-    LINEAR = False
+    T_END = 2.0
+    LINEAR = True
     STEREO = True
     NOISE = True
-    CUB_METHOD = "gh"
+    CUB_METHOD_PROC = "gh"
+    CUB_METHOD_MEAS = "gh"
     CUB_ORDER = 3
     MAP_INIT = False
     TIME_IT = False
@@ -74,7 +75,7 @@ if __name__ == "__main__":
     imu_freq = 100
     sigma_acc_continuous = 0.02
     dt = 1 / imu_freq
-    R_k = np.array([0.05])
+    R_k = np.array([[0.05]])
     if LINEAR:
         meas_model = LaserRangeFinder(R_d=R_k)
     else:
@@ -176,7 +177,7 @@ if __name__ == "__main__":
     ###############################
     if MAP_INIT:
         esgvi_graph = esgvi_from_map(
-            map_problem=problem, cubature_method=CUB_METHOD, cubature_order=CUB_ORDER
+            map_problem=problem, cubature_method=CUB_METHOD_PROC, cubature_order=CUB_ORDER
         )
     else:
         esgvi_graph = generate_trajectory(
@@ -186,7 +187,8 @@ if __name__ == "__main__":
             input_data=input_data_lim,
             meas_data=meas_data_lim,
             process_model=proc_model,
-            cubature=CUB_METHOD,
+            proc_cubature=CUB_METHOD_PROC,
+            meas_cubature=CUB_METHOD_MEAS,
             cubature_order=CUB_ORDER,
         )
     esgvi_graph.verbose = VERBOSE

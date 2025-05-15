@@ -1,3 +1,4 @@
+# %%
 import os
 import sys
 
@@ -13,6 +14,10 @@ sys.path.insert(0, PROJECT_ROOT)
 import numpy as np
 import scipy.linalg
 import navlie as nav
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
+from typing import List, Dict
+
 from src.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
 from src.models.models import LaserRangeFinder
 from src.util.psd import force_sym_PSD
@@ -23,6 +28,10 @@ from src.util.cubatures import (
     student_t_cubature,
     unscented_cubature,
     spherical_cubature,
+    gh_cubature,
+    trans_spherical_cubature,
+    trans_gh_cubature, 
+    trans_unscented_cubature
 )
 
 
@@ -52,7 +61,17 @@ def test_unit_sigmapoints(method="gh", order=3):
 
     gvi_sp, gvi_w = prior_fac._gen_unit_sigma_pts()
     gvi_sp = np.round(gvi_sp, 10)
+    
+    covariance = np.identity(3) * 1e-2
+    sqrt_covar = np.linalg.cholesky(covariance)
 
+    gvi_vec_sp = [
+            sqrt_covar @ sp_i.reshape((-1, 1)) for sp_i in gvi_sp
+        ]
+    nav_vec_sp = sqrt_covar @ nav_sp
+
+    print(gvi_vec_sp)
+    print(nav_vec_sp.T)
     def create_weight_dict(points, weights):
         weight_dict = {}
         for point, weight in zip(points, weights):
@@ -84,19 +103,103 @@ def test_unit_sigmapoints(method="gh", order=3):
         print("Navlie Dictionary:", dict_nav)
         print("My Dictionary:", dict_gvi)
 
-    m = np.zeros(3)
-    for i, w in enumerate(gvi_w):
-        m += w * gvi_sp[i]
-    print(m)
-
 
 def test_student_t_sigmapoints():
-    pass
+    unit_sp, w = student_t_cubature(state_dof=2, order_p=5)
+    print(unit_sp, w)
+    unit_sp_unscented, w_unscented = unscented_cubature(state_dof=2)
+    print(unit_sp_unscented, w_unscented)
+    unit_sp_gh, w_gh = gh_cubature(state_dof=2, order_p=3)
+    print(unit_sp_gh, w_gh)
+    fig, ax = plt.subplots(1, 1)
+    ax: plt.Axes = ax
 
+    ax.scatter(
+        unit_sp_gh[:, 0], unit_sp_gh[:, 1], color="tab:orange", label="Gauss-Hermite"
+    )
+    # ax.scatter(
+    #     unit_sp_unscented[:, 0],
+    #     unit_sp_unscented[:, 1],
+    #     color="tab:blue",
+    #     label="Unscented",
+    # )
+    ax.scatter(unit_sp[:, 0], unit_sp[:, 1], color="tab:red", label="Student's T")
+    circle = Circle(
+        (0, 0),
+        radius=10,
+        edgecolor="black",
+        facecolor="none",
+        linewidth=2,
+        linestyle="-",
+    )
+    ax.add_patch(circle)
 
+    # Make sure the aspect ratio is equal so the circle looks like a circle
+    ax.set_aspect("equal", "box")
+    ax.legend()
+    plt.savefig(
+        f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/sigmapoint_comp_gh.pdf"
+    )
+    plt.show()
+
+def test_transformed_sigmapoints(method = "gh", dof = 2):
+    if method == "gh":
+        trans_sp, trans_w = trans_gh_cubature(state_dof=dof, order_p=3)
+        sp, w = gh_cubature(state_dof=dof, order_p = 3)
+    elif method == "spherical":
+        trans_sp, trans_w = trans_spherical_cubature(state_dof=dof)
+        sp, w = spherical_cubature(state_dof=dof)
+    else:
+        trans_sp, trans_w = trans_unscented_cubature(state_dof=dof)
+        sp, w = unscented_cubature(state_dof=dof, order_p = 3)
+    
+    def create_weight_dict(points, weights):
+        weight_dict = {}
+        for point, weight in zip(points, weights):
+            weight = round(
+                weight, 8
+            )  # Ensure floating point precision issues don't cause mismatches
+            if weight not in weight_dict:
+                weight_dict[weight] = []
+            weight_dict[weight].append(
+                point.tolist()
+            )  # Convert to list for easy comparison
+
+        # Sort points within each weight group to ensure order-independent comparison
+        for weight in weight_dict:
+            weight_dict[weight].sort()
+
+        return weight_dict
+    def compare_weight_dict(dict_1:Dict, dict_2:Dict):
+        for key in dict_1.keys():
+            sp_1 = np.array(dict_1[key])
+            if key not in dict_2.keys():
+                return False
+            sp_2 = np.array(dict_2[key])
+            if not np.allclose(sp_1, sp_2):
+                return False
+        return True
+    
+    dict_trans = create_weight_dict(trans_sp, trans_w)
+    dict_sph = create_weight_dict(sp, w)
+    matching = compare_weight_dict(dict_sph, dict_trans)
+    # assert matching
+    if matching:
+        print(
+            f"Passed: Unit sigma points and weights are equal for {method} and transformed points with n={dof}"
+        )
+        print("Transformed:", dict_trans)
+        print(f"{method}:", dict_sph)
+    
+    if not matching:
+        print(f"Failed: Sigma points and Weights are not equal for n={dof}.")
+        print("transformed:", dict_trans)
+        print(f"{method}:", dict_sph)
+    
 if __name__ == "__main__":
     VERBOSE = False
-    METHOD = "unscented"
+    METHOD = "gh"
     ORDER = 2
-
-    test_unit_sigmapoints(method=METHOD, order=ORDER)
+    # test_unit_sigmapoints(method=METHOD, order=ORDER)
+    # test_student_t_sigmapoints()
+    test_transformed_sigmapoints(method=METHOD, dof=2)

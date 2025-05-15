@@ -271,7 +271,8 @@ class ESGVI:
 
         #  TODO: Check this
         covariance = force_sym_PSD(covariance)
-        information = force_sym_PSD(information)
+        information = force_sym_PSD(splg.inv(covariance))
+        # information = force_sym_PSD(information)
 
         return new_states, information, covariance
 

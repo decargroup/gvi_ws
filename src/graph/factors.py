@@ -4,7 +4,15 @@ from typing import Hashable, List, Tuple, Dict
 import navlie as nav
 from pymlg.numpy.se2 import SE2, SO2
 from typing import Callable, Optional, List
-from src.util.cubatures import gh_cubature, spherical_cubature, unscented_cubature
+from src.util.cubatures import (
+    gh_cubature,
+    spherical_cubature,
+    unscented_cubature,
+    student_t_cubature,
+    trans_spherical_cubature,
+    trans_gh_cubature, 
+    trans_unscented_cubature
+)
 from navlie.lib.states import (
     VectorState,
     SE2State,
@@ -44,10 +52,23 @@ class Factor:
         elif cubature == "unscented":
             self._cubature_fun: Callable = unscented_cubature
 
+        elif cubature == "student_t":
+            self._cubature_fun: Callable = student_t_cubature
+        
+        elif cubature == "trans_spherical":
+            self._cubature_fun: Callable = trans_spherical_cubature
+        
+        elif cubature == "trans_gh":
+            self._cubature_fun: Callable = trans_gh_cubature
+        
+        elif cubature == "trans_unscented":
+            self._cubature_fun: Callable = trans_unscented_cubature
+        
         else:
-            raise ValueError("The field cubature must be 'gh' or 'spherical'.")
+            valid_cubs = ['gh', 'spherical', 'unscented', 'student_t', 'trans_gh', 'trans_spherical', 'trans_unscented']
+            raise ValueError(f"The field cubature must be in {valid_cubs}")
+        
         self._order: int = order
-
         self.type: str = None
         # State Slices for information/covariance matrices
         self.state_slices: List[slice] = [variable_slices[k] for k in self.keys]
@@ -271,10 +292,18 @@ class MeasurementFactor(Factor):
         meas_diff = (
             self._meas_val - self._meas_model.evaluate(sigma_points[0])
         ).reshape((-1, 1))
+        R_k = self._meas_model.covariance(sigma_points[0])
         R_k_inv = force_sym(
-            scipy.linalg.inv(self._meas_model.covariance(sigma_points[0]))
+            scipy.linalg.inv(np.atleast_2d(R_k))
         )
-        phi_meas = 0.5 * meas_diff.T @ R_k_inv @ meas_diff
+        # Gaussian Loss
+        # phi_meas = 0.5 * meas_diff.T @ R_k_inv @ meas_diff
+        # Cauchy Loss Measurement
+        # phi_meas = 0.5 * (3 + 1) * np.log(1.0 + (meas_diff.T @ R_k_inv @ meas_diff / 3))
+        # Skew-Laplace Loss
+        lam = 0.1
+        alpha = np.sqrt(1 + lam**2 / R_k[0,0])
+        phi_meas = (-1 * lam * meas_diff @ R_k_inv ) + (alpha * np.sqrt(R_k_inv) @ np.abs(meas_diff))
         return phi_meas
 
     def evaluate_derivatives(
