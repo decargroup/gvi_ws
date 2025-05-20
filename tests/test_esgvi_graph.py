@@ -1,27 +1,15 @@
-import os
-import sys
-
-# Get the absolute path of the project root (one level above "test")
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-# Change the working directory to the project root
-os.chdir(PROJECT_ROOT)
-
-# Add project root to sys.path so Python finds 'src'
-sys.path.insert(0, PROJECT_ROOT)
-
 import numpy as np
 import scipy.linalg
 import navlie as nav
 from typing import List
 
-from src.util.map_batch import construct_planar_map
-from src.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
-from src.graph.esgvi import ESGVI
-from src.graph.construct_esgvi import generate_trajectory
-from src.models.models import LaserRangeFinder
-from src.util.psd import (
-    force_sym_PSD,
+from gvi_ws.util.map_batch import construct_planar_map
+from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
+from gvi_ws.graph.esgvi import ESGVI
+from gvi_ws.graph.construct_esgvi import generate_trajectory
+from gvi_ws.models.models import LaserRangeFinder
+from gvi_ws.util.psd import (
+    forgvi_wssym_PSD,
     force_sym,
     regularize,
     fast_positive_definite_inverse,

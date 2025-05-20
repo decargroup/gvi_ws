@@ -1,123 +1,132 @@
 # %%
-import os
-import sys
-
-# Get the absolute path of the project root (one level above "test")
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-
-# Change the working directory to the project root
-os.chdir(PROJECT_ROOT)
-
-# Add project root to sys.path so Python finds 'src'
-sys.path.insert(0, PROJECT_ROOT)
 import numpy as np
 import scipy.linalg
 import navlie as nav
 import timeit
 import matplotlib.pyplot as plt
-from typing import List, Tuple
 
-from src.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
-from src.graph.esgvi import ESGVI
-from src.graph.construct_esgvi import generate_trajectory, esgvi_from_map
-from src.util.map_batch import construct_planar_map
-from src.util.psd import (
+from navlie import monte_carlo
+
+from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
+from gvi_ws.graph.esgvi import ESGVI
+from gvi_ws.graph.construct_esgvi import generate_trajectory, esgvi_from_map
+from gvi_ws.models.models import LaserRangeFinder
+from gvi_ws.util.psd import (
     force_sym_PSD,
     force_sym,
     regularize,
     fast_positive_definite_inverse,
+    isPD,
 )
-from src.models.models import (
-    StereoCamera,
+from gvi_ws.util.sparsity import force_block_banded_sparsity
+from gvi_ws.util.map_batch import construct_planar_map
+from navlie.types import State, StateWithCovariance, Measurement, Input
+from navlie.lib.states import MatrixLieGroupState, SE2State, VectorState
+from navlie.filters import generate_sigmapoints
+from navlie.lib.models import (
+    BodyFrameVelocity,
+    DoubleIntegrator,
+    RangePointToAnchor,
+    PointRelativePosition,
 )
-from src.util.data_generation import DataGenerator
-from navlie.lib.states import SE2State, VectorState
-from navlie.types import StateWithCovariance
-from navlie.lib.models import SingleIntegrator, RangePointToAnchor
-from navlie import monte_carlo
+from navlie.batch.residuals import ProcessResidual
+
+from typing import List, Tuple
+
 
 if __name__ == "__main__":
     np.random.seed(1)
     # MC Params
-    TRIALS = 20
+    TRIALS = 10
     # Globals
-    T_TRIAL = 3.0
+    T_TRIAL = 2
     CUB_METHOD = "gh"
     CUB_ORDER = 3
     STEP_TOL = 1e-8
     BACK_ITERS = 1
     INIT_STEP_SIZE = 1e0
-    SAVE_FIGS = False
-    # NOISE Params
-    PROC_NOISE = "gaussian"
-    MEAS_NOISE = "cauchy"
+    SAVE_FIGS = True
+    MEAS_MODEL = "rel_pos"
 
     # ESGVI Params
     MAX_ITERS = 5
-    # Init Prior
-    x0 = VectorState(value=np.array([1, 0]), stamp=0.0, state_id="x0")
-    P0 = np.identity(2) * 1e-3
-    # Init Proc model
-    Q_d = np.identity(2) * 0.1
-    process_model = SingleIntegrator(Q=Q_d)
-    proc_freq = 100
-    # Init Meas Model
-    R_d = np.identity(1) * 1e-2
-    anchor = [0, 4]
-    meas_model = RangePointToAnchor(anchor_position=anchor, R=R_d)
-    meas_freq = 10
+
+    # Trajectory Vals
+    X0_TRUE_GVI = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
+    X0_TRUE_MAP = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
+    P0 = np.identity(3) * 1e-3
+
+    # Init landmarks
+    landmark_positions = [[2, 1], [0, 1], [2, 0]]
+    num_landmarks = len(landmark_positions)
+    landmark_states = [
+        VectorState(landmark, state_id=f"l{i}")
+        for i, landmark in enumerate(landmark_positions)
+    ]
+    # Init models
+    Q_d = np.identity(3) * 0.2
+    proc_model = BodyFrameVelocity(Q=Q_d)
+    proc_model_freq = 100
+    # Meas Model
+    if MEAS_MODEL == "range":
+        R_d = np.identity(1) * 1e-1
+
+        meas_models_gen = [
+            RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
+        ]
+    elif MEAS_MODEL == "rel_pos":
+        R_d = np.identity(2) * 1e-1
+        meas_models_gen = [
+            PointRelativePosition(
+                landmark_position=np.array([l.value]), R=R_d, landmark_id="l0"
+            )
+            for l in landmark_states
+        ]
+    
+    meas_model_freq = 10
+
+    # Input Profile
+    input_profile = lambda t, x: np.array([np.cos(0.1 * t), 1.0, 0])
+
     # Data Generation
-    input_profile = lambda t, x: np.array([np.sin(t), np.cos(t)])
-    # Gaussian Data Generation
-    dg_gaussian = DataGenerator(
-        process_model=process_model,
-        input_func=input_profile,
-        input_covariance=Q_d,
-        input_freq=proc_freq,
-        meas_model_list=meas_model,
-        meas_freq_list=meas_freq,
-        process_noise_type="gaussian",
-        measurement_noise_type="gaussian",
-    )
-    # Other Heavy-Tailed Noise Generation
-    dg_heavy = DataGenerator(
-        process_model=process_model,
-        input_func=input_profile,
-        input_covariance=Q_d,
-        input_freq=proc_freq,
-        meas_model_list=meas_model,
-        meas_freq_list=meas_freq,
-        process_noise_type=PROC_NOISE,
-        measurement_noise_type=MEAS_NOISE,
+    dg = nav.DataGenerator(
+        proc_model,
+        input_profile,
+        Q_d,
+        input_freq=proc_model_freq,
+        meas_model_list=meas_models_gen,
+        meas_freq_list=meas_model_freq,
     )
 
     def run_esgvi_trial(trial_num: int) -> nav.GaussianResultList:
         np.random.seed(trial_num)
-        gt_data, input_data, meas_data_heavy = dg_heavy.generate(
-            x0.copy(), 0, T_TRIAL, noise=True
+        # print("ESGVI: ", trial_num)
+        gt_data, input_data, meas_data = dg.generate(
+            X0_TRUE_GVI.copy(), start=0.0, stop=T_TRIAL, noise=True
         )
-        x0_state = x0.plus(nav.randvec(P0))
-        problem, init_pose_est = construct_planar_map(
-            x0=x0_state.copy(),
+        x0_check = X0_TRUE_GVI.plus(nav.randvec(P0))
+        gvi_problem, init_pose_est = construct_planar_map(
+            x0=x0_check.copy(),
             P0=np.copy(P0),
             input_data=input_data,
-            process_model=process_model,
-            meas_data=meas_data_heavy,
+            process_model=proc_model,
+            meas_data=meas_data,
             slam=False,
             step_tol=STEP_TOL,
         )
         # Initialize ESGVI information
-        problem.variables = {k: v.copy() for k, v in problem.variables_init.items()}
-        problem._compute_size_of_problem()
-        _, H, _ = problem.compute_error_jac_cost()
+        gvi_problem.variables = {k: v.copy() for k, v in gvi_problem.variables_init.items()}
+        gvi_problem._compute_size_of_problem()
+        _, H, _ = gvi_problem.compute_error_jac_cost()
         esgvi_init_info: np.ndarray = (H.T @ H).copy()
+        # Create ESGVI Graph
         esgvi_graph = generate_trajectory(
-            x0_state.copy(),
+            x0_check.copy(),
             P0=P0.copy(),
             init_info_matrix=esgvi_init_info,
             input_data=input_data,
-            meas_data=meas_data_heavy,
-            process_model=process_model,
+            meas_data=meas_data,
+            process_model=proc_model,
             proc_cubature=CUB_METHOD,
             cubature_order=CUB_ORDER,
         )
@@ -126,7 +135,6 @@ if __name__ == "__main__":
         esgvi_graph.backtrack_iters = BACK_ITERS
         esgvi_graph.init_step_distance = INIT_STEP_SIZE
         esgvi_graph.step_tol = STEP_TOL
-
         gvi_states_solved = esgvi_graph.solve()
         est_list_gvi_raw: List[StateWithCovariance] = []
         pose_list_gvi: List[SE2State] = []
@@ -149,16 +157,17 @@ if __name__ == "__main__":
 
     def run_map_trial(trial_num: int) -> nav.GaussianResultList:
         np.random.seed(trial_num)
-        gt_data, input_data, meas_data_heavy = dg_heavy.generate(
-            x0.copy(), 0, T_TRIAL, noise=True
+        # print("MAP: ", trial_num)
+        gt_data, input_data, meas_data = dg.generate(
+            X0_TRUE_MAP.copy(), start=0.0, stop=T_TRIAL, noise=True
         )
-        x0_state = x0.plus(nav.randvec(P0))
+        x0_check = X0_TRUE_MAP.plus(nav.randvec(P0))
         problem, init_pose_est = construct_planar_map(
-            x0=x0_state.copy(),
+            x0=x0_check.copy(),
             P0=np.copy(P0),
             input_data=input_data,
-            process_model=process_model,
-            meas_data=meas_data_heavy,
+            process_model=proc_model,
+            meas_data=meas_data,
             slam=False,
             step_tol=STEP_TOL,
         )
@@ -192,7 +201,7 @@ if __name__ == "__main__":
 
     results_gvi = monte_carlo(run_esgvi_trial, num_trials=TRIALS, num_jobs=4)
     results_gvi_list = results_gvi.trial_results
-
+    # %%
     import matplotlib.pyplot as plt
 
     # Plotting parameters
@@ -202,17 +211,18 @@ if __name__ == "__main__":
     plt.rc("axes", grid=True)
     plt.rc("grid", linestyle="--")
 
-    fig_map, ax_map = nav.plot_nees(
-        results=results_map, confidence_interval=0.997, label="MAP"
+    fig, ax = nav.plot_nees(
+        results=results_map, confidence_interval=0.997, label="MAP",
     )
     fig, ax = nav.plot_nees(
-        results=results_gvi, ax=ax_map, confidence_interval=0.997, label="ESGVI"
+        results=results_gvi, ax=ax, confidence_interval=0.997, label="ESGVI"
     )
+    ax.set_ylabel(r"Mahalanobis Distance, $d^2_k$")
     ax.set_xlabel("Time (s)")
-    ax.set_title("NEES")
+    ax.set_title(f"aNEES {TRIALS} trials for {num_landmarks} landmarks.")
     if SAVE_FIGS:
         plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/2D_{MEAS_NOISE}_nees_{TRIALS}_{T_TRIAL}s.pdf"
+            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_aNEES_{MEAS_MODEL}_{TRIALS}_{T_TRIAL}s.pdf"
         )
     plt.show()
 
@@ -240,16 +250,24 @@ if __name__ == "__main__":
 
     ax[0].plot(results_map.rmse[:, 0], label="MAP", color="tab:blue")
     ax[1].plot(results_map.rmse[:, 1], label="MAP", color="tab:blue")
+    ax[2].plot(results_map.rmse[:, 2], label="MAP", color="tab:blue")
     ax[0].plot(results_gvi.rmse[:, 0], label="ESGVI", color="tab:orange")
     ax[1].plot(results_gvi.rmse[:, 1], label="ESGVI", color="tab:orange")
-    ax[0].set_ylabel(r"$x$ (m)")
-    ax[1].set_ylabel(r"$y$ (m)")
-    ax[1].set_xlabel("Time (s)")
+    ax[2].plot(results_gvi.rmse[:, 2], label="ESGVI", color="tab:orange")
+    ax[0].set_ylabel(r"$\theta$ (rad)")
+    ax[1].set_ylabel(r"$x$ (m)")
+    ax[2].set_ylabel(r"$y$ (m)")
+    ax[2].set_xlabel("Time (s)")
     ax[0].legend()
     ax[1].legend()
+    ax[2].legend()
     plt.tight_layout()
     if SAVE_FIGS:
         plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/2D_{MEAS_NOISE}_rmse_{TRIALS}_{T_TRIAL}s.pdf"
+            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_rmse_{TRIALS}_{T_TRIAL}s.pdf"
         )
     plt.show()
+
+    
+
+# %%

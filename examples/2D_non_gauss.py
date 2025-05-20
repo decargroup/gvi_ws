@@ -1,15 +1,4 @@
 # %%
-import os
-import sys
-
-# Get the absolute path of the project root (one level above "test")
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-# Change the working directory to the project root
-os.chdir(PROJECT_ROOT)
-
-# Add project root to sys.path so Python finds 'src'
-sys.path.insert(0, PROJECT_ROOT)
 import numpy as np
 import scipy.linalg
 import navlie as nav
@@ -17,20 +6,20 @@ import timeit
 import matplotlib.pyplot as plt
 from typing import List, Tuple
 
-from src.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
-from src.graph.esgvi import ESGVI
-from src.graph.construct_esgvi import generate_trajectory, esgvi_from_map
-from src.util.map_batch import construct_planar_map
-from src.util.psd import (
+from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
+from gvi_ws.graph.esgvi import ESGVI
+from gvi_ws.graph.construct_esgvi import generate_trajectory, esgvi_from_map
+from gvi_ws.util.map_batch import construct_planar_map
+from gvi_ws.util.psd import (
     force_sym_PSD,
     force_sym,
     regularize,
     fast_positive_definite_inverse,
 )
-from src.models.models import (
+from gvi_ws.models.models import (
     StereoCamera,
 )
-from src.util.data_generation import DataGenerator
+from gvi_ws.util.data_generation import DataGenerator
 from navlie.lib.states import SE2State, VectorState
 from navlie.types import StateWithCovariance
 from navlie.lib.models import SingleIntegrator, RangePointToAnchor

@@ -2,8 +2,8 @@ import numpy as np
 import scipy.linalg
 import navlie as nav
 
-from src.graph.esgvi import ESGVI
-from src.graph.factors import Factor, PriorFactor, ProcessFactor, MeasurementFactor
+from gvi_ws.graph.esgvi import ESGVI
+from gvi_ws.graph.factors import Factor, PriorFactor, ProcessFactor, MeasurementFactor
 
 from navlie.types import State, Measurement, MeasurementModel, ProcessModel, Input
 from navlie.lib import MatrixLieGroupState, VectorState

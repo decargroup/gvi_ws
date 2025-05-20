@@ -7,9 +7,9 @@ import navlie as nav
 from scipy import sparse
 from scipy import linalg as splg
 
-from src.graph.factors import Factor
-from src.util.psd import force_sym_PSD, force_sym, regularize, isPD
-from src.util.sparsity import force_block_banded_sparsity
+from gvi_ws.graph.factors import Factor
+from gvi_ws.util.psd import force_sym_PSD, force_sym, regularize, isPD
+from gvi_ws.util.sparsity import force_block_banded_sparsity
 from navlie.types import State
 from navlie.lib import MatrixLieGroupState
 

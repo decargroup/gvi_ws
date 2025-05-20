@@ -4,7 +4,7 @@ from typing import Hashable, List, Tuple, Dict
 import navlie as nav
 from pymlg.numpy.se2 import SE2, SO2
 from typing import Callable, Optional, List
-from src.util.cubatures import (
+from gvi_ws.util.cubatures import (
     gh_cubature,
     spherical_cubature,
     unscented_cubature,
@@ -23,7 +23,7 @@ from navlie.lib.states import (
 from navlie.types import ProcessModel, Measurement, Input, StateWithCovariance
 from navlie.batch.problem import Problem
 from navlie.utils import find_nearest_stamp_idx
-from src.util.psd import force_sym_PSD, isPD, force_sym
+from gvi_ws.util.psd import force_sym_PSD, isPD, force_sym
 from abc import abstractmethod
 
 
@@ -297,13 +297,13 @@ class MeasurementFactor(Factor):
             scipy.linalg.inv(np.atleast_2d(R_k))
         )
         # Gaussian Loss
-        # phi_meas = 0.5 * meas_diff.T @ R_k_inv @ meas_diff
+        phi_meas = 0.5 * meas_diff.T @ R_k_inv @ meas_diff
         # Cauchy Loss Measurement
         # phi_meas = 0.5 * (3 + 1) * np.log(1.0 + (meas_diff.T @ R_k_inv @ meas_diff / 3))
         # Skew-Laplace Loss
-        lam = 0.1
-        alpha = np.sqrt(1 + lam**2 / R_k[0,0])
-        phi_meas = (-1 * lam * meas_diff @ R_k_inv ) + (alpha * np.sqrt(R_k_inv) @ np.abs(meas_diff))
+        # lam = 0.1
+        # alpha = np.sqrt(1 + lam**2 / R_k[0,0])
+        # phi_meas = (-1 * lam * meas_diff @ R_k_inv ) + (alpha * np.sqrt(R_k_inv) @ np.abs(meas_diff))
         return phi_meas
 
     def evaluate_derivatives(
