@@ -13,6 +13,7 @@ from gvi_ws.util.cubatures import (
     trans_gh_cubature, 
     trans_unscented_cubature
 )
+from gvi_ws.graph.losses import Loss, GaussianLoss
 from navlie.lib.states import (
     VectorState,
     SE2State,
@@ -35,6 +36,7 @@ class Factor:
         projection: np.ndarray,
         cubature: str = "gh",
         order: int = 3,
+        loss: Loss = GaussianLoss()
     ):
         # If didn't supply list, make a list
         if isinstance(keys, list):
@@ -72,7 +74,8 @@ class Factor:
         self.type: str = None
         # State Slices for information/covariance matrices
         self.state_slices: List[slice] = [variable_slices[k] for k in self.keys]
-
+        # Phi lost function
+        self.loss: Loss = loss
         # Projection Matrix
         self.projection: np.ndarray = projection.copy()
 
@@ -147,8 +150,9 @@ class PriorFactor(Factor):
         projection: np.ndarray,
         cubature: str = "gh",
         order: int = 3,
+        loss: Loss = GaussianLoss()
     ):
-        super().__init__(keys, variable_slices, projection, cubature, order)
+        super().__init__(keys, variable_slices, projection, cubature, order, loss)
 
         self.type = "prior"
 
@@ -189,7 +193,8 @@ class PriorFactor(Factor):
 
     def _eval_factor(self, sigma_points: List[State]):
         prior_diff = sigma_points[0].minus(self._x0).reshape((-1, 1))
-        phi_prior = 0.5 * prior_diff.T @ self._inv_prior_covariance @ prior_diff
+        phi_prior = self.loss.evaluate(prior_diff, self._inv_prior_covariance)
+        # phi_prior = 0.5 * prior_diff.T @ self._inv_prior_covariance @ prior_diff
         return phi_prior
 
     def evaluate_derivatives(
@@ -258,8 +263,9 @@ class MeasurementFactor(Factor):
         projection: np.ndarray,
         cubature: str = "gh",
         order: int = 3,
+        loss: Loss = GaussianLoss()
     ):
-        super().__init__(keys, variable_slices, projection, cubature, order)
+        super().__init__(keys, variable_slices, projection, cubature, order, loss)
 
         # Setup factor specific values
         self.type = "meas"
@@ -296,14 +302,7 @@ class MeasurementFactor(Factor):
         R_k_inv = force_sym(
             scipy.linalg.inv(np.atleast_2d(R_k))
         )
-        # Gaussian Loss
-        phi_meas = 0.5 * meas_diff.T @ R_k_inv @ meas_diff
-        # Cauchy Loss Measurement
-        # phi_meas = 0.5 * (3 + 1) * np.log(1.0 + (meas_diff.T @ R_k_inv @ meas_diff / 3))
-        # Skew-Laplace Loss
-        # lam = 0.1
-        # alpha = np.sqrt(1 + lam**2 / R_k[0,0])
-        # phi_meas = (-1 * lam * meas_diff @ R_k_inv ) + (alpha * np.sqrt(R_k_inv) @ np.abs(meas_diff))
+        phi_meas = self.loss.evaluate(meas_diff, R_k_inv)
         return phi_meas
 
     def evaluate_derivatives(
@@ -368,8 +367,9 @@ class ProcessFactor(Factor):
         projection: np.ndarray,
         cubature: str = "gh",
         order: int = 3,
+        loss: Loss = GaussianLoss()
     ):
-        super().__init__(keys, variable_slices, projection, cubature, order)
+        super().__init__(keys, variable_slices, projection, cubature, order, loss)
 
         if len(self.keys) != 2:
             raise ValueError("Process factor must depend on two states.")
@@ -439,6 +439,7 @@ class ProcessFactor(Factor):
             assert propagated.direction == sp_k.direction
         process_diff = sp_k.minus(propagated).reshape((-1, 1))
         phi_proc = 0.5 * process_diff.T @ Q_k_inv @ process_diff
+        phi_proc = self.loss.evaluate(process_diff, Q_k_inv)
         return phi_proc
 
     def evaluate_derivatives(

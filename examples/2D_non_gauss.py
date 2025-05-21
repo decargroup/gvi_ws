@@ -8,17 +8,11 @@ from typing import List, Tuple
 
 from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
 from gvi_ws.graph.esgvi import ESGVI
+from gvi_ws.graph.losses import SkewLaplaceLoss, GaussianLoss, StudentTLoss, CauchyLoss
 from gvi_ws.graph.construct_esgvi import generate_trajectory, esgvi_from_map
 from gvi_ws.util.map_batch import construct_planar_map
-from gvi_ws.util.psd import (
-    force_sym_PSD,
-    force_sym,
-    regularize,
-    fast_positive_definite_inverse,
-)
-from gvi_ws.models.models import (
-    StereoCamera,
-)
+from gvi_ws.util.load_config import load_config
+
 from gvi_ws.util.data_generation import DataGenerator
 from navlie.lib.states import SE2State, VectorState
 from navlie.types import StateWithCovariance
@@ -26,30 +20,42 @@ from navlie.lib.models import SingleIntegrator, RangePointToAnchor
 from navlie.batch.losses import L2Loss, CauchyLoss
 
 if __name__ == "__main__":
-    np.random.seed(1)
-    T_END = 2.0
-    LINEAR = False
-    STEREO = True
-    NOISE = True
-    CUB_METHOD_PROC = "gh"
-    CUB_METHOD_MEAS = "gh"
-    CUB_ORDER = 3
-    MAP_INIT = False
-    TIME_IT = False
-    STEP_TOL = 1e-8
+    config = load_config("config/2D_localization.yaml")
+    np.random.seed(config["SEED"])
+    T_END = config["T_END"]
+    NOISE = config["NOISE"]
+    CUB_METHOD_PROC = config["SP_METHOD_PROC"]
+    CUB_METHOD_MEAS = config["SP_METHOD_MEAS"]
+    CUB_ORDER = config["CUB_ORDER"]
+    MAP_INIT = config["MAP_INIT"]
+    TIME_IT = config["TIME_IT"]
+    STEP_TOL = config["STEP_TOL"]
     # ESGVI params
-    BACKTRACK = False
-    VERBOSE = True
-    MAX_ITERS = 10
-    BACK_ITERS = 10
-    INIT_STEP_SIZE = 1e0
+    VERBOSE = config["VERBOSE"]
+    MAX_ITERS = config["MAX_ITERS"]
+    BACK_ITERS = config["BACK_ITERS"]
+    INIT_STEP_SIZE = float(config["INIT_STEP_SIZE"])
     # Noise Params
-    PROC_NOISE = "gaussian"
-    MEAS_NOISE = "skew_laplace"
-    LOSS_FUN = CauchyLoss()
+    PROC_NOISE = config["PROC_NOISE"]
+    MEAS_NOISE = config["MEAS_NOISE"]
+    MAP_LOSS_FUN = config["MAP_LOSS_FUN"]
+    GVI_LOSS_FUN = config["GVI_LOSS_FUN"]
+    if MAP_LOSS_FUN == "cauchy":
+        MAP_LOSS_FUN = CauchyLoss()
+    else:
+        MAP_LOSS_FUN = L2Loss()
+    if GVI_LOSS_FUN == "skew_laplace":
+        gvi_skew_lambda = float(config["GVI_SKEW_LAMBDA"])
+        GVI_LOSS_FUN = SkewLaplaceLoss(lamb=gvi_skew_lambda)
+    elif GVI_LOSS_FUN == "student_t":
+        gvi_t_dof = float(config["GVI_T_DOF"])
+        GVI_LOSS_FUN = StudentTLoss(dof=gvi_t_dof)
+    else:
+        GVI_LOSS_FUN = GaussianLoss()
+    
     # Script Params
-    SAVE_FIGS = False
-    SHOW_FIGS = True
+    SAVE_FIGS = config["SAVE_FIGS"]
+    SHOW_FIGS = config["SHOW_FIGS"]
 
     # Init Prior
     x0 = VectorState(value=np.array([1, 0]), stamp=0.0, state_id="x0")
@@ -116,7 +122,7 @@ if __name__ == "__main__":
         input_data=input_data_heavy,
         process_model=process_model,
         meas_data=meas_data_heavy,
-        loss_fun=LOSS_FUN,
+        loss_fun=MAP_LOSS_FUN,
         slam=False,
         step_tol=STEP_TOL,  
     )
@@ -164,6 +170,8 @@ if __name__ == "__main__":
             process_model=process_model,
             proc_cubature=CUB_METHOD_PROC,
             cubature_order=CUB_ORDER,
+            meas_loss=GVI_LOSS_FUN,
+            proc_loss = GaussianLoss()
         )
     esgvi_graph.verbose = VERBOSE
     esgvi_graph.max_iters = MAX_ITERS

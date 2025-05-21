@@ -1,0 +1,26 @@
+# Parameters for SE2 Localization Example
+
+# Simulation Params
+seed: 0
+T_END: 0.5
+MEAS_MODEL: "relative_pos" # "range" # "relative_pos"
+NOISE: true
+# Type of noise corrupting process/measurement models.
+NOISE_TYPE_PROC: "gaussian"
+NOISE_TYPE_MEAS: "gaussian"
+SP_METHOD_PROC: "gh" # Sigma point method for process/prior factors.
+SP_METHOD_MEAS: "gh" # Sigma point method for measurement factors.
+CUB_ORDER: 3
+MAP_INIT: false
+TIME_IT: false
+
+# ESGVI Params
+VERBOSE: true
+MAX_ITERS: 10
+BACK_ITERS: 1
+INIT_STEP_SIZE: 1e0
+STEP_TOL: 1e-8
+
+# Script Params
+SAVE_FIGS: false
+SHOW_FIGS: true

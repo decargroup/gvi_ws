@@ -4,6 +4,7 @@ import navlie as nav
 
 from gvi_ws.graph.esgvi import ESGVI
 from gvi_ws.graph.factors import Factor, PriorFactor, ProcessFactor, MeasurementFactor
+from gvi_ws.graph.losses import Loss, GaussianLoss
 
 from navlie.types import State, Measurement, MeasurementModel, ProcessModel, Input
 from navlie.lib import MatrixLieGroupState, VectorState
@@ -30,6 +31,8 @@ def generate_trajectory(
     proc_cubature: str = "gh",
     meas_cubature: str = "gh",
     cubature_order: int = 3,
+    proc_loss: Loss = GaussianLoss(), 
+    meas_loss: Loss = GaussianLoss(),
     init_landmark: List[State] = None,
     P0_lanmdark: np.ndarray = None,
 ) -> ESGVI:
@@ -100,6 +103,7 @@ def generate_trajectory(
             projection=process_proj,
             cubature=proc_cubature,
             order=cubature_order,
+            loss = proc_loss
         )
         esgvi_graph.add_factor(process_factor)
         idx_proc += x0.dof
@@ -118,6 +122,7 @@ def generate_trajectory(
             projection=meas_proj,
             cubature=meas_cubature,
             order=cubature_order,
+            loss=meas_loss
         )
         esgvi_graph.add_factor(meas_factor)
 

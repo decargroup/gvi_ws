@@ -18,6 +18,7 @@ from gvi_ws.util.psd import (
 )
 from gvi_ws.util.sparsity import force_block_banded_sparsity
 from gvi_ws.util.map_batch import construct_planar_map
+from gvi_ws.util.load_config import load_config
 from navlie.types import State, StateWithCovariance, Measurement, Input
 from navlie.lib.states import MatrixLieGroupState, SE2State, VectorState
 from navlie.filters import generate_sigmapoints
@@ -33,24 +34,27 @@ from typing import List, Tuple
 
 # %%
 if __name__ == "__main__":
-    np.random.seed(0)
-    T_END = 2.0
-    NOISE = True
-    CUB_METHOD_PROC = "gh"
-    CUB_METHOD_MEAS = "gh"
-    CUB_ORDER = 3
-    MAP_INIT = False
-    TIME_IT = False
-    STEP_TOL = 1e-8
-    # ESGVI params
-    BACKTRACK = False
-    VERBOSE = True
-    MAX_ITERS = 10
-    BACK_ITERS = 1
-    INIT_STEP_SIZE = 1e0
-    # Script Params
-    SAVE_FIGS = False
-    SHOW_FIGS = True
+    config = load_config("config/se2_localization.yaml")
+    
+    np.random.seed(config["seed"])
+    
+    T_END = config["T_END"]
+    NOISE = config["NOISE"]
+    CUB_METHOD_PROC = config["SP_METHOD_PROC"]
+    CUB_METHOD_MEAS = config["SP_METHOD_MEAS"]
+    CUB_ORDER = config["CUB_ORDER"]
+    MAP_INIT = config["MAP_INIT"]
+    TIME_IT = config["TIME_IT"]
+    MEAS_MODEL = config["MEAS_MODEL"]
+    
+    VERBOSE = config["VERBOSE"]
+    MAX_ITERS = config["MAX_ITERS"]
+    BACK_ITERS = config["BACK_ITERS"]
+    INIT_STEP_SIZE = config["INIT_STEP_SIZE"]
+    
+    SAVE_FIGS = config["SAVE_FIGS"]
+    SHOW_FIGS = config["SHOW_FIGS"]
+    STEP_TOL = float(config["STEP_TOL"])
 
     # Init Prior
     x0 = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
@@ -67,18 +71,22 @@ if __name__ == "__main__":
     proc_model_freq = 100
 
     # Meas Model
-    R_d = np.identity(2) * 1e-2
-    meas_models_gen = [
-        PointRelativePosition(
-            landmark_position=np.array([l.value]), R=R_d, landmark_id="l0"
-        )
-        for l in landmark_states
-    ]
-    # R_d = np.identity(1) * 1e-2
-    # meas_models_gen = [
-    #     RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
-    # ]
     meas_model_freq = 10
+    
+    if MEAS_MODEL=="relative_pos":
+        R_d = np.identity(2) * 1e-2
+        meas_models_gen = [
+            PointRelativePosition(
+                landmark_position=np.array([l.value]), R=R_d, landmark_id=f"l{i}"
+            )
+            for i,l in enumerate(landmark_states)
+    ]
+    else:
+        R_d = np.identity(1) * 1e-2
+        meas_models_gen = [
+            RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
+        ]
+    
 
     # Input Profile
     input_profile = lambda t, x: np.array([np.cos(0.1 * t), 1.0, 0])
