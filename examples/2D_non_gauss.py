@@ -9,7 +9,7 @@ from typing import List, Tuple
 from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
 from gvi_ws.graph.esgvi import ESGVI
 from gvi_ws.graph.losses import SkewLaplaceLoss, GaussianLoss, StudentTLoss, CauchyLoss
-from gvi_ws.graph.construct_esgvi import generate_trajectory, esgvi_from_map
+from gvi_ws.graph.construct_esgvi import generate_esgvi_graph, esgvi_from_map
 from gvi_ws.util.map_batch import construct_planar_map
 from gvi_ws.util.load_config import load_config
 
@@ -21,6 +21,7 @@ from navlie.batch.losses import L2Loss, CauchyLoss
 
 if __name__ == "__main__":
     config = load_config("config/2D_localization.yaml")
+    noise_config = load_config("config/noise_config.yaml")
     np.random.seed(config["SEED"])
     T_END = config["T_END"]
     NOISE = config["NOISE"]
@@ -36,28 +37,29 @@ if __name__ == "__main__":
     BACK_ITERS = config["BACK_ITERS"]
     INIT_STEP_SIZE = float(config["INIT_STEP_SIZE"])
     # Noise Params
-    PROC_NOISE = config["PROC_NOISE"]
-    MEAS_NOISE = config["MEAS_NOISE"]
-    MAP_LOSS_FUN = config["MAP_LOSS_FUN"]
-    GVI_LOSS_FUN = config["GVI_LOSS_FUN"]
+    PROC_NOISE = noise_config["PROC_NOISE"]
+    MEAS_NOISE = noise_config["MEAS_NOISE"]
+    MAP_LOSS_FUN = noise_config["MAP_LOSS_FUN"]
+    GVI_LOSS_FUN = noise_config["GVI_LOSS_FUN"]
     if MAP_LOSS_FUN == "cauchy":
         MAP_LOSS_FUN = CauchyLoss()
     else:
         MAP_LOSS_FUN = L2Loss()
     if GVI_LOSS_FUN == "skew_laplace":
-        gvi_skew_lambda = float(config["GVI_SKEW_LAMBDA"])
+        gvi_skew_lambda = float(noise_config["GVI_SKEW_LAMBDA"])
         GVI_LOSS_FUN = SkewLaplaceLoss(lamb=gvi_skew_lambda)
     elif GVI_LOSS_FUN == "student_t":
-        gvi_t_dof = float(config["GVI_T_DOF"])
+        gvi_t_dof = float(noise_config["GVI_T_DOF"])
         GVI_LOSS_FUN = StudentTLoss(dof=gvi_t_dof)
     else:
         GVI_LOSS_FUN = GaussianLoss()
-    
+
     # Script Params
     SAVE_FIGS = config["SAVE_FIGS"]
     SHOW_FIGS = config["SHOW_FIGS"]
 
     # Init Prior
+
     x0 = VectorState(value=np.array([1, 0]), stamp=0.0, state_id="x0")
     P0 = np.identity(2) * 1e-3
     # Init Proc model
@@ -100,15 +102,17 @@ if __name__ == "__main__":
     _, input_data_heavy, meas_data_heavy = dg_heavy.generate(
         x0.copy(), 0, T_END, noise=NOISE
     )
-
-    fig_gauss, ax_gauss = nav.plot_meas(meas_data_gauss, state_list=gt_data)
+    fig, axs = plt.subplots(1, 2, sharey=True)
+    fig_gauss, ax_gauss = nav.plot_meas(meas_data_gauss, state_list=gt_data, axs=axs[0])
     ax_gauss[0].set_title(f"Gaussian Range Measurements")
     ax_gauss[0].set_xlabel(f"Time (s)")
-    fig_dual, ax_heavy = nav.plot_meas(meas_data_heavy, state_list=gt_data)
+    ax_gauss[0].set_ylabel(f"Range (m)")
+    fig_dual, ax_heavy = nav.plot_meas(meas_data_heavy, state_list=gt_data, axs=axs[1])
     ax_heavy[0].set_title(f"{MEAS_NOISE.capitalize()} Range Measurements")
     ax_heavy[0].set_xlabel(f"Time (s)")
     low, up = ax_heavy[0].get_ylim()
     ax_gauss[0].set_ybound(low, up)
+    fig.tight_layout()
     plt.show()
 
     if NOISE:
@@ -124,7 +128,7 @@ if __name__ == "__main__":
         meas_data=meas_data_heavy,
         loss_fun=MAP_LOSS_FUN,
         slam=False,
-        step_tol=STEP_TOL,  
+        step_tol=STEP_TOL,
     )
     # Initialize ESGVI information
     problem.variables = {k: v.copy() for k, v in problem.variables_init.items()}
@@ -158,10 +162,12 @@ if __name__ == "__main__":
     # ESGVI Setup
     if MAP_INIT:
         esgvi_graph = esgvi_from_map(
-            map_problem=problem, cubature_method=CUB_METHOD_PROC, cubature_order=CUB_ORDER
+            map_problem=problem,
+            cubature_method=CUB_METHOD_PROC,
+            cubature_order=CUB_ORDER,
         )
     else:
-        esgvi_graph = generate_trajectory(
+        esgvi_graph = generate_esgvi_graph(
             x0_state.copy(),
             P0=P0.copy(),
             init_info_matrix=esgvi_init_info,
@@ -169,9 +175,10 @@ if __name__ == "__main__":
             meas_data=meas_data_heavy,
             process_model=process_model,
             proc_cubature=CUB_METHOD_PROC,
+            meas_cubature=CUB_METHOD_MEAS,
             cubature_order=CUB_ORDER,
             meas_loss=GVI_LOSS_FUN,
-            proc_loss = GaussianLoss()
+            proc_loss=GaussianLoss(),
         )
     esgvi_graph.verbose = VERBOSE
     esgvi_graph.max_iters = MAX_ITERS

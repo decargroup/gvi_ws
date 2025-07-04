@@ -14,6 +14,7 @@ from navlie.types import (
     Input,
     Measurement,
 )
+from gvi_ws.util.load_config import load_config
 from navlie.lib import VectorInput
 
 
@@ -46,14 +47,15 @@ def randvec(
     elif method == "cauchy":
         return L @ np.random.standard_cauchy((cov.shape[0], num_samples))
     elif method == "student_t":
+        dof = load_config("config/noise_config.yaml")["GVI_T_DOF"]
         return L @ np.random.standard_t(
-            df=cov.shape[0], size=(cov.shape[0], num_samples)
+            df=dof, size=(cov.shape[0], num_samples)
         )
     elif method == 'skew_laplace':
         # ~ Gamma(1,2)
         beta = np.random.gamma(shape=1, scale=2, size=num_samples) 
         mu = 0
-        lam = 0.1
+        lam = load_config("config/noise_config.yaml")["GVI_SKEW_LAMBDA"]
         sigma = L[0,0]
         if max(L.shape)>1:
             raise NotImplementedError("Multivariate skew_laplace noise not implemented yet.")

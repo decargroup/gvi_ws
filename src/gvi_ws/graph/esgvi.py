@@ -26,6 +26,7 @@ class ESGVI:
         backtrack_on: bool = True,
         backtrack_iters: int = 10,
         init_step_distance: float = 1.0,
+        backtrack_multiplier: float = 0.9,
         verbose: bool = True,
     ):
         # Solver Params
@@ -55,8 +56,8 @@ class ESGVI:
         self._num_landmarks: int = 0
 
         # Cost values
-        self.new_cost: int = None
-        self.prev_cost: int = None
+        self.new_cost: float = None
+        self.prev_cost: float = None
         self.cost_history: List[float] = []
         self.factor_cost_history: List[List[Tuple[str, float]]] = []
 
@@ -68,11 +69,13 @@ class ESGVI:
         # Backtracking Values
         self.backtrack_on = backtrack_on
         self.backtrack_iters = backtrack_iters
+        self._backtrack_cost: float = 0
         self.init_step_distance = init_step_distance
+        self.backtrack_multiplier = backtrack_multiplier
         self.last_alpha = None
 
     def is_converged(self, delta_mean, new_info, new_covar, n_iters):
-        # TODO: Check if this should cur_cost or prev_cost
+        # TODO: Check if this should use cur_cost or prev_cost
         cost = self.prev_cost
         delta_cost = np.abs(self.new_cost - self.prev_cost)
         # Delta mean size
@@ -206,7 +209,10 @@ class ESGVI:
                 self.prev_cost = self.new_cost
             else:
                 backtrack_success, new_info, new_covar = self.backtrack(
-                    new_info, new_covar, init_step_dist=self.init_step_distance
+                    new_info,
+                    new_covar,
+                    init_step_dist=self.init_step_distance,
+                    alpha_multiplier=self.backtrack_multiplier,
                 )
                 if backtrack_success:
                     self._information_matrix = new_info
@@ -363,7 +369,9 @@ class ESGVI:
                 )
 
         if self.verbose:
-            print(f"Backtracking didn't find suitable step size after {n_iters}")
+            print(
+                f"Backtracking didn't find suitable step size after {n_iters}. \nTry increasing backtracking iterations, or aggresiveness."
+            )
 
         return False, backtrack_info, backtrack_covar
 

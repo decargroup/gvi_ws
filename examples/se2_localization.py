@@ -4,19 +4,11 @@ import scipy.linalg
 import navlie as nav
 import timeit
 import matplotlib.pyplot as plt
+import cProfile
 
-from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
-from gvi_ws.graph.esgvi import ESGVI
-from gvi_ws.graph.construct_esgvi import generate_trajectory, esgvi_from_map
-from gvi_ws.models.models import LaserRangeFinder
-from gvi_ws.util.psd import (
-    force_sym_PSD,
-    force_sym,
-    regularize,
-    fast_positive_definite_inverse,
-    isPD,
-)
-from gvi_ws.util.sparsity import force_block_banded_sparsity
+from gvi_ws.graph.losses import SkewLaplaceLoss, GaussianLoss, StudentTLoss, CauchyLoss
+from gvi_ws.graph.construct_esgvi import generate_esgvi_graph, esgvi_from_map
+from gvi_ws.util.data_generation import DataGenerator
 from gvi_ws.util.map_batch import construct_planar_map
 from gvi_ws.util.load_config import load_config
 from navlie.types import State, StateWithCovariance, Measurement, Input
@@ -24,20 +16,21 @@ from navlie.lib.states import MatrixLieGroupState, SE2State, VectorState
 from navlie.filters import generate_sigmapoints
 from navlie.lib.models import (
     BodyFrameVelocity,
-    DoubleIntegrator,
     RangePointToAnchor,
     PointRelativePosition,
+    RangePoseToAnchor,
 )
-from navlie.batch.residuals import ProcessResidual
+from navlie.batch.losses import CauchyLoss, L2Loss
 
 from typing import List, Tuple
 
 # %%
 if __name__ == "__main__":
     config = load_config("config/se2_localization.yaml")
-    
+    noise_config = load_config("config/noise_config.yaml")
+
     np.random.seed(config["seed"])
-    
+
     T_END = config["T_END"]
     NOISE = config["NOISE"]
     CUB_METHOD_PROC = config["SP_METHOD_PROC"]
@@ -46,63 +39,129 @@ if __name__ == "__main__":
     MAP_INIT = config["MAP_INIT"]
     TIME_IT = config["TIME_IT"]
     MEAS_MODEL = config["MEAS_MODEL"]
-    
+
     VERBOSE = config["VERBOSE"]
     MAX_ITERS = config["MAX_ITERS"]
     BACK_ITERS = config["BACK_ITERS"]
-    INIT_STEP_SIZE = config["INIT_STEP_SIZE"]
-    
+    INIT_STEP_SIZE = float(config["INIT_STEP_SIZE"])
+
     SAVE_FIGS = config["SAVE_FIGS"]
     SHOW_FIGS = config["SHOW_FIGS"]
     STEP_TOL = float(config["STEP_TOL"])
+
+    # Noise Params
+    PROC_NOISE = noise_config["PROC_NOISE"]
+    MEAS_NOISE = noise_config["MEAS_NOISE"]
+    MAP_LOSS_FUN = noise_config["MAP_LOSS_FUN"]
+    GVI_LOSS_FUN = noise_config["GVI_LOSS_FUN"]
+    if MAP_LOSS_FUN == "cauchy":
+        MAP_LOSS_FUN = CauchyLoss()
+    else:
+        MAP_LOSS_FUN = L2Loss()
+    if GVI_LOSS_FUN == "skew_laplace":
+        gvi_skew_lambda = float(noise_config["GVI_SKEW_LAMBDA"])
+        GVI_LOSS_FUN = SkewLaplaceLoss(lamb=gvi_skew_lambda)
+    elif GVI_LOSS_FUN == "student_t":
+        gvi_t_dof = float(noise_config["GVI_T_DOF"])
+        GVI_LOSS_FUN = StudentTLoss(dof=gvi_t_dof)
+    else:
+        GVI_LOSS_FUN = GaussianLoss()
 
     # Init Prior
     x0 = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
     P0 = np.identity(3) * 1e-3
     # Init landmarks
     landmark_positions = [[2, 1], [0, 1], [2, 0]]
+    num_landmarks = len(landmark_positions)
+    # landmark_positions = [[2, 1]]
     landmark_states = [
         VectorState(landmark, state_id=f"l{i}")
         for i, landmark in enumerate(landmark_positions)
     ]
     # Init models
-    Q_d = np.identity(3) * 0.2
+    Q_d = np.diag([0.1**2, 0.1, 0.05])
     proc_model = BodyFrameVelocity(Q=Q_d)
     proc_model_freq = 100
 
     # Meas Model
     meas_model_freq = 10
-    
-    if MEAS_MODEL=="relative_pos":
+
+    if MEAS_MODEL == "relative_pos":
         R_d = np.identity(2) * 1e-2
         meas_models_gen = [
             PointRelativePosition(
                 landmark_position=np.array([l.value]), R=R_d, landmark_id=f"l{i}"
             )
-            for i,l in enumerate(landmark_states)
-    ]
-    else:
+            for i, l in enumerate(landmark_states)
+        ]
+    elif MEAS_MODEL == "range_point":
         R_d = np.identity(1) * 1e-2
         meas_models_gen = [
             RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
         ]
-    
+    else:  # RangePoseToAnchor
+        R_d = np.identity(1) * 1e-2
+        tag_position = np.array([0.1, 0.1])
+        meas_models_gen = [
+            RangePoseToAnchor(
+                anchor_position=l.value, tag_body_position=tag_position, R=R_d
+            )
+            for l in landmark_states
+        ]
 
     # Input Profile
     input_profile = lambda t, x: np.array([np.cos(0.1 * t), 1.0, 0])
 
     # Data Generation
-    dg = nav.DataGenerator(
-        proc_model,
-        input_profile,
-        Q_d,
+    dg = DataGenerator(
+        process_model=proc_model,
+        input_func=input_profile,
+        input_covariance=Q_d,
         input_freq=proc_model_freq,
         meas_model_list=meas_models_gen,
         meas_freq_list=[meas_model_freq] * len(meas_models_gen),
+        process_noise_type=PROC_NOISE,
+        measurement_noise_type=MEAS_NOISE,
+    )
+    # Gaussian Data Generation
+    dg_gaussian = DataGenerator(
+        process_model=proc_model,
+        input_func=input_profile,
+        input_covariance=Q_d,
+        input_freq=proc_model_freq,
+        meas_model_list=meas_models_gen,
+        meas_freq_list=[meas_model_freq] * len(meas_models_gen),
+        process_noise_type="gaussian",
+        measurement_noise_type="gaussian",
+    )
+
+    gt_data, input_data_gauss, meas_data_gauss = dg_gaussian.generate(
+        x0.copy(), 0, T_END, noise=NOISE
     )
     gt_poses, input_data, meas_data = dg.generate(
         x0.copy(), start=0.0, stop=T_END, noise=NOISE
     )
+
+    fig, axs = plt.subplots(1, 2, sharey=True)
+    fig_gauss, ax_gauss = nav.plot_meas(
+        meas_data_gauss[::num_landmarks], state_list=gt_data, axs=axs[0]
+    )
+    ax_gauss[0].set_title(f"Gaussian Range Measurements")
+    ax_gauss[0].set_xlabel(f"Time (s)")
+    ax_gauss[0].set_ylabel(f"Range (m)")
+    fig_dual, ax_heavy = nav.plot_meas(
+        meas_data[::num_landmarks], state_list=gt_data, axs=axs[1]
+    )
+    ax_heavy[0].set_title(f"{MEAS_NOISE.capitalize()} Range Measurements")
+    ax_heavy[0].set_xlabel(f"Time (s)")
+    low, up = ax_heavy[0].get_ylim()
+    ax_gauss[0].set_ybound(low, up)
+    if SAVE_FIGS:
+        plt.savefig(
+            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_noise_comp.pdf"
+        )
+    plt.show()
+
     # If limit on poses wanted
     input_data_lim = input_data[:]
     meas_data_lim = meas_data[:]
@@ -119,6 +178,7 @@ if __name__ == "__main__":
         input_data=input_data_lim,
         process_model=proc_model,
         meas_data=meas_data_lim,
+        loss_fun=MAP_LOSS_FUN,
         slam=False,
         step_tol=STEP_TOL,
     )
@@ -167,10 +227,12 @@ if __name__ == "__main__":
     ###############################
     if MAP_INIT:
         esgvi_graph = esgvi_from_map(
-            map_problem=problem, cubature_method=CUB_METHOD_PROC, cubature_order=CUB_ORDER
+            map_problem=problem,
+            cubature_method=CUB_METHOD_PROC,
+            cubature_order=CUB_ORDER,
         )
     else:
-        esgvi_graph = generate_trajectory(
+        esgvi_graph = generate_esgvi_graph(
             x0_state.copy(),
             P0=P0.copy(),
             init_info_matrix=esgvi_init_info,
@@ -180,6 +242,8 @@ if __name__ == "__main__":
             proc_cubature=CUB_METHOD_PROC,
             meas_cubature=CUB_METHOD_MEAS,
             cubature_order=CUB_ORDER,
+            meas_loss=GVI_LOSS_FUN,
+            proc_loss=GaussianLoss(),
         )
     esgvi_graph.verbose = VERBOSE
     esgvi_graph.max_iters = MAX_ITERS

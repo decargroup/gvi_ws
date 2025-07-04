@@ -21,7 +21,7 @@ from navlie.batch.residuals import (
 from typing import List, Tuple
 
 
-def generate_trajectory(
+def generate_esgvi_graph(
     x0: State,
     P0: np.ndarray,
     init_info_matrix: np.ndarray,
@@ -31,11 +31,34 @@ def generate_trajectory(
     proc_cubature: str = "gh",
     meas_cubature: str = "gh",
     cubature_order: int = 3,
-    proc_loss: Loss = GaussianLoss(), 
+    proc_loss: Loss = GaussianLoss(),
     meas_loss: Loss = GaussianLoss(),
     init_landmark: List[State] = None,
     P0_lanmdark: np.ndarray = None,
 ) -> ESGVI:
+    """
+    Generate the ESGVI factor graph from initial state and covariance, input
+    and measurement data. Add options around cubature methods, process and measurement loss
+    shapes.
+
+    Parameters:
+        x0               : Initial state.
+        P0               : Initial covariance.
+        init_info_matrix : Initial trajectory-level information matrix.
+        input_data       : List of input data.
+        meas_data        : List of measurement data.
+        process_model    : Process model or motion model.
+        proc_cubature    : Cubature method for the process factors.
+        meas_cubature    : Cubature method for the measurement factors.
+        cubature_order   : Order of the cubature method.
+        proc_loss        : Loss/Distribution of the process factor.
+        meas_loss        : Loss/Distribution of the measurement factor.
+        init_landmark    : Initial landmark positions for SLAM examples.
+        P0_lanmdark      : Initial covariance of landmark positions.
+
+    Returns:
+        ESGVI factor graph.
+    """
     if init_landmark is not None:
         raise NotImplementedError("Figure out how to initialize the covariance matrix")
 
@@ -103,7 +126,7 @@ def generate_trajectory(
             projection=process_proj,
             cubature=proc_cubature,
             order=cubature_order,
-            loss = proc_loss
+            loss=proc_loss,
         )
         esgvi_graph.add_factor(process_factor)
         idx_proc += x0.dof
@@ -122,7 +145,7 @@ def generate_trajectory(
             projection=meas_proj,
             cubature=meas_cubature,
             order=cubature_order,
-            loss=meas_loss
+            loss=meas_loss,
         )
         esgvi_graph.add_factor(meas_factor)
 
@@ -132,7 +155,13 @@ def generate_trajectory(
 
 
 def esgvi_from_map(
-    map_problem: Problem, cubature_method: str = "gh", cubature_order: int = 3
+    map_problem: Problem,
+    proc_cubature: str = "gh",
+    meas_cubature: str = "gh",
+    cubature_order: int = 3,
+    proc_loss: Loss = GaussianLoss(),
+    meas_loss: Loss = GaussianLoss(),
+    meas_cov: np.ndarray = None,
 ):
     esgvi_graph = ESGVI()
     total_dof = map_problem._size_state
@@ -180,13 +209,16 @@ def esgvi_from_map(
                 input=u,
                 variable_slices=var_slices,
                 projection=proj_proc,
-                cubature=cubature_method,
+                cubature=proc_cubature,
                 order=cubature_order,
+                loss=proc_loss,
             )
             esgvi_graph.add_factor(fac_k)
             idx_proc += state_dof
         elif isinstance(res, MeasurementResidual):
             meas = res._y
+            if meas_cov is not None:
+                meas.model._R = meas_cov
             keys_k = res.keys
             proj_meas = proj_empty.copy()
             proj_meas[:, idx_meas : idx_meas + state_dof] = np.identity(state_dof)
@@ -198,8 +230,9 @@ def esgvi_from_map(
                 measurement=meas,
                 variable_slices=var_slices,
                 projection=proj_meas,
-                cubature=cubature_method,
+                cubature=meas_cubature,
                 order=cubature_order,
+                loss=meas_loss,
             )
             esgvi_graph.add_factor(fac_k)
             idx_meas += state_dof

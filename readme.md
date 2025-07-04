@@ -1,6 +1,6 @@
 # GVI Workspace
 
-A Python package for graph-based variational inference (GVI) in robotics and state estimation. This workspace includes simulation tools, models, and benchmarking utilities built around the [`navlie`](https://github.com/decargroup/navlie) library and other scientific Python tools.
+A Python package for gaussian variational inference (GVI) for batch state estimation in robotics. This workspace includes simulation tools, models, and benchmarking utilities built around the [`navlie`](https://github.com/decargroup/navlie) library.
 
 ## Project Structure
 ```
@@ -16,7 +16,7 @@ gvi-ws/
 
 ## Installation
 
-We recommend using a virtual environment:
+Recommended to use a virtual environment:
 
 ```bash
 # Create and activate environment (optional)
@@ -37,8 +37,9 @@ python examples/se2_localization.py
 
 Plots and benchmark figures are generated into the `figs/` directory by the example scripts. These include:
 
-- aNEES and NEES performance plots
-- RMSE trajectories
+- RMSE and NEES performance plots.
+- Measurement comparisons given various noise models (Gaussian, Cauchy, Student-T, Skew-Laplace)
+- Estimated trajectories of the robot.
 
 ## Dependencies
 
@@ -47,6 +48,6 @@ Developed with tools from the [DECAR group](https://www.decar.ca/):
 - [`pymlg`](https://github.com/decargroup/pymlg) — Lie group math.
 
 Other library dependencies:
-- `numpy`, `scipy`, `matplotlib`, `seaborn`.
+- `numpy`, `scipy`, `matplotlib`.
 
 See `pyproject.toml` for full dependency list.

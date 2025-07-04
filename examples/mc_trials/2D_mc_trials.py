@@ -9,7 +9,7 @@ from navlie import monte_carlo
 
 from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
 from gvi_ws.graph.esgvi import ESGVI
-from gvi_ws.graph.construct_esgvi import generate_trajectory, esgvi_from_map
+from gvi_ws.graph.construct_esgvi import generate_esgvi_graph, esgvi_from_map
 from gvi_ws.models.models import (
     LaserRangeFinder,
     Simulator,
@@ -112,7 +112,7 @@ if __name__ == "__main__":
         _, H, _ = problem.compute_error_jac_cost()
         esgvi_init_info: np.ndarray = (H.T @ H).copy()
         # Create ESGVI Graph
-        esgvi_graph = generate_trajectory(
+        esgvi_graph = generate_esgvi_graph(
             x0_check.copy(),
             P0=P0.copy(),
             init_info_matrix=esgvi_init_info,

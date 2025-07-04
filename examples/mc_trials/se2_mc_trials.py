@@ -7,54 +7,71 @@ import matplotlib.pyplot as plt
 
 from navlie import monte_carlo
 
-from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
-from gvi_ws.graph.esgvi import ESGVI
-from gvi_ws.graph.construct_esgvi import generate_trajectory, esgvi_from_map
-from gvi_ws.models.models import LaserRangeFinder
-from gvi_ws.util.psd import (
-    force_sym_PSD,
-    force_sym,
-    regularize,
-    fast_positive_definite_inverse,
-    isPD,
-)
-from gvi_ws.util.sparsity import force_block_banded_sparsity
+from gvi_ws.graph.construct_esgvi import generate_esgvi_graph, esgvi_from_map
 from gvi_ws.util.map_batch import construct_planar_map
 from navlie.types import State, StateWithCovariance, Measurement, Input
 from navlie.lib.states import MatrixLieGroupState, SE2State, VectorState
-from navlie.filters import generate_sigmapoints
 from navlie.lib.models import (
     BodyFrameVelocity,
-    DoubleIntegrator,
     RangePointToAnchor,
     PointRelativePosition,
 )
-from navlie.batch.residuals import ProcessResidual
-
+from navlie.batch.losses import CauchyLoss, L2Loss
+from gvi_ws.util.load_config import load_config
+from gvi_ws.graph.losses import SkewLaplaceLoss, GaussianLoss, StudentTLoss
 from typing import List, Tuple
-
+from gvi_ws.util.data_generation import DataGenerator
 
 if __name__ == "__main__":
-    np.random.seed(1)
     # MC Params
-    TRIALS = 10
-    # Globals
-    T_TRIAL = 2
-    CUB_METHOD = "gh"
-    CUB_ORDER = 3
-    STEP_TOL = 1e-8
-    BACK_ITERS = 1
-    INIT_STEP_SIZE = 1e0
-    SAVE_FIGS = True
-    MEAS_MODEL = "rel_pos"
+    MC_TRIALS = 10
+    T_TRIAL = 2.0
 
-    # ESGVI Params
-    MAX_ITERS = 5
+    config = load_config("config/se2_localization.yaml")
+    noise_config = load_config("config/noise_config.yaml")
+    
+    np.random.seed(0)
+    
+    T_END = config["T_END"]
+    NOISE = config["NOISE"]
+    CUB_METHOD_PROC = config["SP_METHOD_PROC"]
+    CUB_METHOD_MEAS = config["SP_METHOD_MEAS"]
+    CUB_ORDER = config["CUB_ORDER"]
+    MAP_INIT = config["MAP_INIT"]
+    TIME_IT = config["TIME_IT"]
+    MEAS_MODEL = config["MEAS_MODEL"]
+    
+    VERBOSE = config["VERBOSE"]
+    MAX_ITERS = config["MAX_ITERS"]
+    BACK_ITERS = config["BACK_ITERS"]
+    INIT_STEP_SIZE = float(config["INIT_STEP_SIZE"])
+    
+    SAVE_FIGS = config["SAVE_FIGS"]
+    SHOW_FIGS = config["SHOW_FIGS"]
+    STEP_TOL = float(config["STEP_TOL"])
+
+    # Noise Params
+    PROC_NOISE = noise_config["PROC_NOISE"]
+    MEAS_NOISE = noise_config["MEAS_NOISE"]
+    MAP_LOSS_FUN = noise_config["MAP_LOSS_FUN"]
+    GVI_LOSS_FUN = noise_config["GVI_LOSS_FUN"]
+    if MAP_LOSS_FUN == "cauchy":
+        MAP_LOSS_FUN = CauchyLoss()
+    else:
+        MAP_LOSS_FUN = L2Loss()
+    if GVI_LOSS_FUN == "skew_laplace":
+        gvi_skew_lambda = float(noise_config["GVI_SKEW_LAMBDA"])
+        GVI_LOSS_FUN = SkewLaplaceLoss(lamb=gvi_skew_lambda)
+    elif GVI_LOSS_FUN == "student_t":
+        gvi_t_dof = float(noise_config["GVI_T_DOF"])
+        GVI_LOSS_FUN = StudentTLoss(dof=gvi_t_dof)
+    else:
+        GVI_LOSS_FUN = GaussianLoss()
 
     # Trajectory Vals
     X0_TRUE_GVI = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
     X0_TRUE_MAP = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
-    P0 = np.identity(3) * 1e-3
+    P0 = np.identity(3) * 1e-6
 
     # Init landmarks
     landmark_positions = [[2, 1], [0, 1], [2, 0]]
@@ -64,18 +81,18 @@ if __name__ == "__main__":
         for i, landmark in enumerate(landmark_positions)
     ]
     # Init models
-    Q_d = np.identity(3) * 0.2
+    Q_d = np.diag([0.1**2, 0.1, 0.05])
     proc_model = BodyFrameVelocity(Q=Q_d)
     proc_model_freq = 100
     # Meas Model
     if MEAS_MODEL == "range":
-        R_d = np.identity(1) * 1e-1
+        R_d = np.identity(1) * 1e-2
 
         meas_models_gen = [
             RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
         ]
-    elif MEAS_MODEL == "rel_pos":
-        R_d = np.identity(2) * 1e-1
+    elif MEAS_MODEL == "relative_pos":
+        R_d = np.identity(2) * 1e-2
         meas_models_gen = [
             PointRelativePosition(
                 landmark_position=np.array([l.value]), R=R_d, landmark_id="l0"
@@ -89,13 +106,15 @@ if __name__ == "__main__":
     input_profile = lambda t, x: np.array([np.cos(0.1 * t), 1.0, 0])
 
     # Data Generation
-    dg = nav.DataGenerator(
-        proc_model,
-        input_profile,
-        Q_d,
+    dg = DataGenerator(
+        process_model=proc_model,
+        input_func=input_profile,
+        input_covariance=Q_d,
         input_freq=proc_model_freq,
         meas_model_list=meas_models_gen,
-        meas_freq_list=meas_model_freq,
+        meas_freq_list=[meas_model_freq] * len(meas_models_gen),
+        process_noise_type=PROC_NOISE,
+        measurement_noise_type=MEAS_NOISE,
     )
 
     def run_esgvi_trial(trial_num: int) -> nav.GaussianResultList:
@@ -113,6 +132,7 @@ if __name__ == "__main__":
             meas_data=meas_data,
             slam=False,
             step_tol=STEP_TOL,
+            loss_fun=MAP_LOSS_FUN
         )
         # Initialize ESGVI information
         gvi_problem.variables = {k: v.copy() for k, v in gvi_problem.variables_init.items()}
@@ -120,15 +140,18 @@ if __name__ == "__main__":
         _, H, _ = gvi_problem.compute_error_jac_cost()
         esgvi_init_info: np.ndarray = (H.T @ H).copy()
         # Create ESGVI Graph
-        esgvi_graph = generate_trajectory(
+        esgvi_graph = generate_esgvi_graph(
             x0_check.copy(),
             P0=P0.copy(),
             init_info_matrix=esgvi_init_info,
             input_data=input_data,
             meas_data=meas_data,
             process_model=proc_model,
-            proc_cubature=CUB_METHOD,
+            proc_cubature=CUB_METHOD_PROC,
+            meas_cubature=CUB_METHOD_MEAS,
             cubature_order=CUB_ORDER,
+            meas_loss=GVI_LOSS_FUN,
+            proc_loss=GaussianLoss()
         )
         esgvi_graph.verbose = False
         esgvi_graph.max_iters = MAX_ITERS
@@ -168,6 +191,7 @@ if __name__ == "__main__":
             input_data=input_data,
             process_model=proc_model,
             meas_data=meas_data,
+            loss_fun=MAP_LOSS_FUN,
             slam=False,
             step_tol=STEP_TOL,
         )
@@ -196,10 +220,10 @@ if __name__ == "__main__":
         results_map = nav.GaussianResultList.from_estimates(est_list_map, gt_list)
         return results_map
 
-    results_map = monte_carlo(run_map_trial, num_trials=TRIALS, num_jobs=4)
+    results_map = monte_carlo(run_map_trial, num_trials=MC_TRIALS, num_jobs=4)
     results_map_list = results_map.trial_results
 
-    results_gvi = monte_carlo(run_esgvi_trial, num_trials=TRIALS, num_jobs=4)
+    results_gvi = monte_carlo(run_esgvi_trial, num_trials=MC_TRIALS, num_jobs=4)
     results_gvi_list = results_gvi.trial_results
     # %%
     import matplotlib.pyplot as plt
@@ -219,10 +243,10 @@ if __name__ == "__main__":
     )
     ax.set_ylabel(r"Mahalanobis Distance, $d^2_k$")
     ax.set_xlabel("Time (s)")
-    ax.set_title(f"aNEES {TRIALS} trials for {num_landmarks} landmarks.")
+    ax.set_title(f"aNEES {MC_TRIALS} trials for {num_landmarks} landmarks.")
     if SAVE_FIGS:
         plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_aNEES_{MEAS_MODEL}_{TRIALS}_{T_TRIAL}s.pdf"
+            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_aNEES_{MEAS_NOISE}_{MC_TRIALS}_{int(T_TRIAL)}s.pdf"
         )
     plt.show()
 
@@ -247,7 +271,6 @@ if __name__ == "__main__":
 
     fig, ax = plt.subplots(3, 1, sharex=True)
     ax: List[plt.Axes] = ax
-
     ax[0].plot(results_map.rmse[:, 0], label="MAP", color="tab:blue")
     ax[1].plot(results_map.rmse[:, 1], label="MAP", color="tab:blue")
     ax[2].plot(results_map.rmse[:, 2], label="MAP", color="tab:blue")
@@ -264,7 +287,7 @@ if __name__ == "__main__":
     plt.tight_layout()
     if SAVE_FIGS:
         plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_rmse_{TRIALS}_{T_TRIAL}s.pdf"
+            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_rmse_{MEAS_NOISE}_{MC_TRIALS}_{int(T_TRIAL)}s.pdf"
         )
     plt.show()
 

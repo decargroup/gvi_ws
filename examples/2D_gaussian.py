@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
 from gvi_ws.graph.esgvi import ESGVI
-from gvi_ws.graph.construct_esgvi import generate_trajectory, esgvi_from_map
+from gvi_ws.graph.construct_esgvi import generate_esgvi_graph, esgvi_from_map
 from gvi_ws.models.models import LaserRangeFinder
 from gvi_ws.util.psd import (
     force_sym_PSD,
@@ -169,7 +169,7 @@ if __name__ == "__main__":
             map_problem=problem, cubature_method=CUB_METHOD_PROC, cubature_order=CUB_ORDER
         )
     else:
-        esgvi_graph = generate_trajectory(
+        esgvi_graph = generate_esgvi_graph(
             x0_state.copy(),
             P0=P0.copy(),
             init_info_matrix=esgvi_init_info,
