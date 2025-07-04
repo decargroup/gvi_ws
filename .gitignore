@@ -50,3 +50,7 @@ clean_figs.bash
 # Notes to self document
 notes_todo.txt
 
+# vscode parameters
+/.vscode
+
+
