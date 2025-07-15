@@ -184,7 +184,7 @@ class ESGVI:
             # Force sparsity constraints of information matrix
             # new_info = self._force_sparsity(new_info)
             # Force symmetric PSD
-            # new_info = force_sym_PSD(new_info)
+            new_info = force_sym_PSD(new_info)
 
             # TODO: Redo this using sparsity trick
             new_covar = force_sym_PSD(splg.inv(new_info))
@@ -255,29 +255,29 @@ class ESGVI:
             state_delta_mean = delta_mean[state_slice, 0]
             new_states[key] = state.plus(state_delta_mean)
             # Change the covariance and information values if on-manifold
-            if update_covariance and isinstance(state, MatrixLieGroupState):
-                if state.direction == "left":
-                    jac = state.group.left_jacobian(state_delta_mean)
-                    jac_inv = state.group.left_jacobian_inv(state_delta_mean)
-                if state.direction == "right":
-                    jac = state.group.right_jacobian(state_delta_mean)
-                    jac_inv = state.group.right_jacobian_inv(state_delta_mean)
+            # if update_covariance and isinstance(state, MatrixLieGroupState):
+            #     if state.direction == "left":
+            #         jac = state.group.left_jacobian(state_delta_mean)
+            #         jac_inv = state.group.left_jacobian_inv(state_delta_mean)
+            #     if state.direction == "right":
+            #         jac = state.group.right_jacobian(state_delta_mean)
+            #         jac_inv = state.group.right_jacobian_inv(state_delta_mean)
 
-                new_state_covar = covariance[state_slice, state_slice].copy()
-                new_state_info = information[state_slice, state_slice].copy()
+            #     new_state_covar = covariance[state_slice, state_slice].copy()
+            #     new_state_info = information[state_slice, state_slice].copy()
 
-                # TODO: Should this be forced PSD?
-                # new_state_covar = jac_inv @ new_state_covar @ jac_inv.T
-                # new_state_info = jac.T @ new_state_info @ jac
-                # new_state_covar = force_sym_PSD(jac_inv @ new_state_covar @ jac_inv.T)
-                # new_state_info = force_sym_PSD(jac.T @ new_state_info @ jac)
+            #     # TODO: Should this be forced PSD?
+            #     # new_state_covar = jac_inv @ new_state_covar @ jac_inv.T
+            #     # new_state_info = jac.T @ new_state_info @ jac
+            #     # new_state_covar = force_sym_PSD(jac_inv @ new_state_covar @ jac_inv.T)
+            #     # new_state_info = force_sym_PSD(jac.T @ new_state_info @ jac)
 
-                covariance[state_slice, state_slice] = new_state_covar
-                information[state_slice, state_slice] = new_state_info
+            #     covariance[state_slice, state_slice] = new_state_covar
+            #     information[state_slice, state_slice] = new_state_info
 
-        #  TODO: Check this
-        covariance = force_sym_PSD(covariance)
-        information = force_sym_PSD(splg.inv(covariance))
+        #  TODO: Check if this needs to be done for MLG States
+        # covariance = force_sym_PSD(covariance)
+        # information = force_sym_PSD(splg.inv(covariance))
         # information = force_sym_PSD(information)
 
         return new_states, information, covariance

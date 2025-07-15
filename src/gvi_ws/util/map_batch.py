@@ -23,7 +23,9 @@ from navlie.batch.residuals import (
 )
 from navlie.utils import find_nearest_stamp_idx
 from navlie.batch.losses import L2Loss, CauchyLoss, LossFunction
+from navlie.batch.gaussian_mixtures import HessianSumMixtureResidual
 from pymlg.numpy.se2 import SE2, SO2
+
 
 # Define the measurement residual, which links a robot state to a landmark
 class PointRelativePositionResidual(Residual):
@@ -158,6 +160,83 @@ def construct_planar_map(
             key_2 = landmark_id
             meas_residual = PointRelativePositionResidual([key_1, key_2], meas)
         problem.add_residual(meas_residual, loss=loss_fun)
+
+    return problem, init_pose_est
+
+
+def construct_gmm_map(
+    x0: SE2State,
+    P0: np.ndarray,
+    input_data: List[VectorInput],
+    process_model: ProcessModel,
+    meas_data: List[Measurement],
+    means: List[float],
+    covariances: List[np.ndarray],
+    weights: List[float],
+    pose_key_string="x",
+    step_tol=1e-7,
+) -> Tuple[Problem, List[nav.State]]:
+    x0_hat = x0.copy()
+    x0_hat.state_id = pose_key_string + "0"
+    init_pose_est = [x0_hat]
+    x = x0_hat.copy()
+    for k in range(len(input_data) - 1):
+        u = input_data[k]
+        dt = input_data[k + 1].stamp - u.stamp
+        x = process_model.evaluate(x, u, dt)
+        x.stamp = x.stamp + dt
+        x.state_id = pose_key_string + str(k + 1)
+        init_pose_est.append(x.copy())
+    problem = Problem(step_tol=step_tol)
+    for i, state in enumerate(init_pose_est):
+        problem.add_variable(state.state_id, state)
+
+    est_stamps = [state.stamp for state in init_pose_est]
+
+    init_cov = np.copy(
+        P0
+    )  # set a small covariance since we've initialized to groundtruth
+    prior_residual = PriorResidual(x0_hat.state_id, x0_hat.copy(), init_cov)
+    problem.add_residual(prior_residual)
+
+    # Add process residuals
+    for k in range(len(input_data) - 1):
+        u = input_data[k]
+
+        key_1 = f"{pose_key_string}{k}"
+        key_2 = f"{pose_key_string}{k+1}"
+        process_residual = ProcessResidual(
+            [key_1, key_2],
+            process_model,
+            u,
+        )
+        problem.add_residual(process_residual)
+
+    # Before adding in the measurements to the problem, we need to replace the
+    # measurement model on the measurements with the measurement model with unknown
+    # landmark position
+    for k, meas in enumerate(meas_data):
+        # Get the pose key
+        pose_idx = find_nearest_stamp_idx(est_stamps, meas.stamp)
+        # Get state at this id
+        pose = init_pose_est[pose_idx]
+        key_1 = pose.state_id
+        component_residuals = []
+        for mix_i in range(len(weights)):
+            meas_cp = Measurement(
+                meas.value.copy(), meas.stamp, model=meas.model, state_id=meas.state_id
+            )
+            meas_cp.value = meas.value.copy() - means[mix_i]
+            meas_cp.model._R = covariances[mix_i]
+            meas_residual = MeasurementResidual(
+                [key_1],
+                meas_cp,
+            )
+            component_residuals.append(meas_residual)
+        gmm_residual = HessianSumMixtureResidual(
+            errors=component_residuals, weights=weights
+        )
+        problem.add_residual(gmm_residual)
 
     return problem, init_pose_est
 
