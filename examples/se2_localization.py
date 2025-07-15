@@ -107,7 +107,7 @@ if __name__ == "__main__":
     print("Starting MAP Estimation")
     print("Starting MAP Estimation")
     problem, init_pose_est = construct_planar_map(
-        x0=x0.copy(),
+        x0=x0_state.copy(),
         P0=P0.copy(),
         input_data=input_data,
         process_model=proc_model,
@@ -170,7 +170,7 @@ if __name__ == "__main__":
         )
     else:
         esgvi_graph = generate_esgvi_graph(
-            x0.copy(),
+            x0_state.copy(),
             P0=P0.copy(),
             init_info_matrix=esgvi_init_info,
             input_data=input_data,
