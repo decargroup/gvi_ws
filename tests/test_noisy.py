@@ -16,13 +16,16 @@ from navlie.filters import generate_sigmapoints
 from gvi_ws.util.cubatures import (
     student_t_cubature,
     gh_cubature,
-    trans_gh_cubature, 
-    )
+    trans_gh_cubature,
+)
+from gvi_ws.util.data_generation import randvec
 from gvi_ws.util.psd import (
     force_sym_PSD,
     force_sym,
 )
 from navlie.lib.models import BodyFrameVelocity, LinearMeasurement
+from gvi_ws.util.fit_skew_laplace import fit_skew_laplace, skew_laplace_pdf
+
 
 def test_student_t_meas_factor(verbose=False, method="gh", order=3):
     key1 = "x0"
@@ -77,40 +80,42 @@ def test_student_t_meas_factor(verbose=False, method="gh", order=3):
     ), f"Info update:\n{matrix} \n Not equal to measurement info:\n {R_k_inv}"
     print("Passed!")
 
+
 def sample_skew_laplace(mu, sigma, lam, n_samples=10000):
     """
     Samples from the skew-Laplace distribution using the NVMM representation.
-    
+
     Parameters:
         mu (float): Location parameter
         sigma (float): Scale parameter (> 0)
         lam (float): Skewness parameter
         n_samples (int): Number of samples to draw
-    
+
     Returns:
         np.ndarray: Array of samples from skew-Laplace distribution
     """
-    beta = np.random.gamma(shape=1, scale=2, size=n_samples) # ~ Gamma(1,2)
+    beta = np.random.gamma(shape=1, scale=2, size=n_samples)  # ~ Gamma(1,2)
     z = np.random.normal(loc=mu + beta * lam, scale=np.sqrt(beta) * sigma)
-    return z
+    return np.atleast_2d(z)
+
 
 def sample_skew_laplace_mv(mu, cov, lam, num_samples=10000):
     """
     Multivariate skew-Laplace sampling using the NVMM structure with Cholesky-based correlation.
-    
+
     Parameters:
         mu (np.ndarray): Mean vector (d,)
         cov (np.ndarray): Covariance matrix (d, d)
         lam (np.ndarray): Skewness vector (d,)
         num_samples (int): Number of samples to generate
-    
+
     Returns:
         np.ndarray: Samples of shape (d, num_samples)
     """
     d = len(mu)
     mu = np.asarray(mu).reshape(-1, 1)
     lam = np.asarray(lam).reshape(-1, 1)
-    
+
     # Cholesky decomposition of covariance matrix
     L = np.linalg.cholesky(cov)
 
@@ -122,11 +127,13 @@ def sample_skew_laplace_mv(mu, cov, lam, num_samples=10000):
 
     # Step 3: Scale and shift
     z = mu + lam @ beta + L @ (np.sqrt(beta) * eps)
-    
+
     return z
 
 
-def plot_cov_ellipse(cov, mean, ax, n_std=2.0, facecolor='none', edgecolor='red', **kwargs):
+def plot_cov_ellipse(
+    cov, mean, ax, n_std=2.0, facecolor="none", edgecolor="red", **kwargs
+):
     """
     Plots an n-std covariance ellipse for a 2D Gaussian.
     """
@@ -135,32 +142,49 @@ def plot_cov_ellipse(cov, mean, ax, n_std=2.0, facecolor='none', edgecolor='red'
     vals, vecs = vals[order], vecs[:, order]
     theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
     width, height = 2 * n_std * np.sqrt(vals)
-    ellipse = Ellipse(xy=mean, width=width, height=height, angle=theta,
-                      facecolor=facecolor, edgecolor=edgecolor, **kwargs)
+    ellipse = Ellipse(
+        xy=mean,
+        width=width,
+        height=height,
+        angle=theta,
+        facecolor=facecolor,
+        edgecolor=edgecolor,
+        **kwargs,
+    )
     ax.add_patch(ellipse)
-if __name__=="__main__":
-    mu = np.array([0.0, 0.0])
-    cov = np.array([[1.0, 0.8],
-                    [0.8, 1.0]])
-    lam = np.array([2.0, -1.0])
 
-    # Sample and compute empirical mean and covariance
-    samples = sample_skew_laplace_mv(mu, cov, lam, num_samples=10000)
-    emp_mean = np.mean(samples, axis=1)
-    emp_cov = np.cov(samples)
 
-    # Plot
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.scatter(samples[0], samples[1], alpha=0.3, s=5, color="purple", label="Samples")
+if __name__ == "__main__":
 
-    # Draw 1-sigma and 2-sigma ellipses
-    plot_cov_ellipse(emp_cov, emp_mean, ax, n_std=1.0, edgecolor='blue', label="1σ ellipse")
-    plot_cov_ellipse(emp_cov, emp_mean, ax, n_std=2.0, edgecolor='red', label="2σ ellipse")
-
-    ax.set_xlabel("Dimension 1")
-    ax.set_ylabel("Dimension 2")
-    ax.set_title("Multivariate Skew-Laplace Samples with Covariance Ellipses")
-    ax.grid(True)
-    ax.axis("equal")
-    ax.legend()
+    # samples = sample_skew_laplace(
+    #     mu=np.zeros((1, 1)), sigma=np.sqrt(np.array([[0.05]])), lam=0.1, n_samples=10000
+    # )
+    std_dev_true = np.array([[0.2]])
+    samples = randvec(
+        cov=np.square(std_dev_true), num_samples=10000, method="skew_laplace"
+    )
+    samples = samples.reshape((-1, 1))
+    # Plot histogram
+    fig, ax = plt.subplots()
+    ax.hist(
+        samples,
+        bins="fd",
+        alpha=0.6,
+        color="grey",
+        edgecolor="black",
+        density=True,
+    )
+    mu_sl, std_sl, lambda_sl = fit_skew_laplace(samples)
+    # X-range for PDFs
+    x = np.linspace(-1, 2, 500)
+    pdf_sl = skew_laplace_pdf(x, mu_sl, std_sl, lambda_sl)
+    ax.plot(
+        x,
+        pdf_sl,
+        "--",
+        linewidth=2,
+        color="tab:green",
+        label=f"Skew-Laplace Fit\nμ={mu_sl:.2f}, σ={std_sl:.2f}, λ={lambda_sl:.3f}",
+    )
+    ax.legend(fontsize=10, loc="upper right", frameon=True)
     plt.show()

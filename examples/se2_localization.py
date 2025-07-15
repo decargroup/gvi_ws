@@ -23,16 +23,19 @@ from navlie.lib.models import (
 from navlie.batch.losses import CauchyLoss, L2Loss
 
 from typing import List, Tuple
+import pickle
+import os
 
 # %%
 if __name__ == "__main__":
     config = load_config("config/se2_localization.yaml")
     noise_config = load_config("config/noise_config.yaml")
 
-    np.random.seed(config["seed"])
+    np.random.seed(config["SEED"])
 
     T_END = config["T_END"]
     NOISE = config["NOISE"]
+    USE_FIT = config["USE_FIT"]
     CUB_METHOD_PROC = config["SP_METHOD_PROC"]
     CUB_METHOD_MEAS = config["SP_METHOD_MEAS"]
     CUB_ORDER = config["CUB_ORDER"]
@@ -67,117 +70,68 @@ if __name__ == "__main__":
     else:
         GVI_LOSS_FUN = GaussianLoss()
 
-    # Init Prior
-    x0 = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
-    P0 = np.identity(3) * 1e-3
-    # Init landmarks
-    landmark_positions = [[2, 1], [0, 1], [2, 0]]
-    num_landmarks = len(landmark_positions)
-    # landmark_positions = [[2, 1]]
-    landmark_states = [
-        VectorState(landmark, state_id=f"l{i}")
-        for i, landmark in enumerate(landmark_positions)
-    ]
-    # Init models
-    Q_d = np.diag([0.1**2, 0.1, 0.05])
-    proc_model = BodyFrameVelocity(Q=Q_d)
-    proc_model_freq = 100
+    # Load data
+    DATA_PATH = "./data/sim/meas_data_se2.pkl"
+    with open(DATA_PATH, "rb") as f:
+        data = pickle.load(f)
 
-    # Meas Model
-    meas_model_freq = 10
+    x0: State = data["x0"]
+    P0: np.ndarray = data["P0"]
+    proc_model = data["process_model"]
+    fitted_noise_dict = data["fitted_noise_params"]
+    landmarks = data["landmarks"]
 
-    if MEAS_MODEL == "relative_pos":
-        R_d = np.identity(2) * 1e-2
-        meas_models_gen = [
-            PointRelativePosition(
-                landmark_position=np.array([l.value]), R=R_d, landmark_id=f"l{i}"
-            )
-            for i, l in enumerate(landmark_states)
-        ]
-    elif MEAS_MODEL == "range_point":
-        R_d = np.identity(1) * 1e-2
-        meas_models_gen = [
-            RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
-        ]
-    else:  # RangePoseToAnchor
-        R_d = np.identity(1) * 1e-2
-        tag_position = np.array([0.1, 0.1])
-        meas_models_gen = [
-            RangePoseToAnchor(
-                anchor_position=l.value, tag_body_position=tag_position, R=R_d
-            )
-            for l in landmark_states
-        ]
-
-    # Input Profile
-    input_profile = lambda t, x: np.array([np.cos(0.1 * t), 1.0, 0])
-
-    # Data Generation
-    dg = DataGenerator(
-        process_model=proc_model,
-        input_func=input_profile,
-        input_covariance=Q_d,
-        input_freq=proc_model_freq,
-        meas_model_list=meas_models_gen,
-        meas_freq_list=[meas_model_freq] * len(meas_models_gen),
-        process_noise_type=PROC_NOISE,
-        measurement_noise_type=MEAS_NOISE,
-    )
-    # Gaussian Data Generation
-    dg_gaussian = DataGenerator(
-        process_model=proc_model,
-        input_func=input_profile,
-        input_covariance=Q_d,
-        input_freq=proc_model_freq,
-        meas_model_list=meas_models_gen,
-        meas_freq_list=[meas_model_freq] * len(meas_models_gen),
-        process_noise_type="gaussian",
-        measurement_noise_type="gaussian",
-    )
-
-    gt_data, input_data_gauss, meas_data_gauss = dg_gaussian.generate(
-        x0.copy(), 0, T_END, noise=NOISE
-    )
-    gt_poses, input_data, meas_data = dg.generate(
-        x0.copy(), start=0.0, stop=T_END, noise=NOISE
-    )
-
-    fig, axs = plt.subplots(1, 2, sharey=True)
-    fig_gauss, ax_gauss = nav.plot_meas(
-        meas_data_gauss[::num_landmarks], state_list=gt_data, axs=axs[0]
-    )
-    ax_gauss[0].set_title(f"Gaussian Range Measurements")
-    ax_gauss[0].set_xlabel(f"Time (s)")
-    ax_gauss[0].set_ylabel(f"Range (m)")
-    fig_dual, ax_heavy = nav.plot_meas(
-        meas_data[::num_landmarks], state_list=gt_data, axs=axs[1]
-    )
-    ax_heavy[0].set_title(f"{MEAS_NOISE.capitalize()} Range Measurements")
-    ax_heavy[0].set_xlabel(f"Time (s)")
-    low, up = ax_heavy[0].get_ylim()
-    ax_gauss[0].set_ybound(low, up)
-    if SAVE_FIGS:
-        plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/se2_noise_comp.pdf"
-        )
-    plt.show()
+    gt_data = data["ground_truth"]
+    gt_stamps = [gt.stamp for gt in gt_data]
+    input_data: List[Input] = data["input_data"]
+    meas_data_map = data["meas_data_non_gauss"]
+    meas_data_gvi = data["meas_data_non_gauss"]
+    meas_stamps = [meas.stamp for meas in meas_data_map]
 
     # If limit on poses wanted
-    input_data_lim = input_data[:]
-    meas_data_lim = meas_data[:]
-    gt_data_lim = gt_poses[:]
+
+    input_data_lim = [u for u in input_data if u.stamp <= T_END]
+    input_stamps = [u.stamp for u in input_data]
+    match_inputs_meas = nav.associate_stamps(
+        input_stamps, meas_stamps, max_difference=0.005
+    )
+    inputs = []
+    measurements_map = []
+    measurements_gvi = []
+    for match in match_inputs_meas:
+        inputs.append(input_data[match[0]])
+        meas_gvi = meas_data_gvi[match[1]]
+        meas_map = meas_data_map[match[1]]
+
+        # Change noise params to the fitted ones
+        if USE_FIT and GVI_LOSS_FUN == "skew_laplace":
+            std_dev_gauss = fitted_noise_dict["Gaussian"][1]
+            std_dev_gvi = fitted_noise_dict["Skew Laplace"][1]
+            skew_lambda_gvi = fitted_noise_dict["Skew Laplace"][2]
+            GVI_LOSS_FUN = SkewLaplaceLoss(lamb=skew_lambda_gvi)
+            meas_map.model._R = np.array([std_dev_gauss**2])
+            meas_gvi.model._R = np.array([std_dev_gvi**2])
+
+        measurements_map.append(meas_map)
+        measurements_gvi.append(meas_gvi)
+
+    match_inputs_gt = nav.associate_stamps(input_stamps, gt_stamps, max_difference=0.01)
+    ground_truth = []
+    for match in match_inputs_gt:
+        ground_truth.append(gt_data[match[1]])
 
     if NOISE:
         x0_state = x0.plus(nav.randvec(P0))
 
     # MAP Computation
     print("Starting MAP Estimation")
+    print("Starting MAP Estimation")
     problem, init_pose_est = construct_planar_map(
-        x0=x0_state.copy(),
-        P0=np.copy(P0),
-        input_data=input_data_lim,
+        x0=x0.copy(),
+        P0=P0.copy(),
+        input_data=inputs,
         process_model=proc_model,
-        meas_data=meas_data_lim,
+        meas_data=measurements_map,
         loss_fun=MAP_LOSS_FUN,
         slam=False,
         step_tol=STEP_TOL,
@@ -211,13 +165,13 @@ if __name__ == "__main__":
         pose_list_map.append(state)
 
     estimate_stamps_map = [float(x.state.stamp) for x in estimate_list_map]
-    gt_stamps = [x.stamp for x in gt_data_lim]
+    gt_stamps = [x.stamp for x in gt_data]
     matches = nav.associate_stamps(estimate_stamps_map, gt_stamps)
 
     est_list_map = []
     gt_list = []
     for match in matches:
-        gt_list.append(gt_data_lim[match[1]])
+        gt_list.append(gt_data[match[1]])
         est_list_map.append(estimate_list_map[match[0]])
 
     results_map = nav.GaussianResultList.from_estimates(est_list_map, gt_list)
@@ -228,20 +182,23 @@ if __name__ == "__main__":
     if MAP_INIT:
         esgvi_graph = esgvi_from_map(
             map_problem=problem,
-            cubature_method=CUB_METHOD_PROC,
-            cubature_order=CUB_ORDER,
+            proc_cubature="gh",
+            meas_cubature="gh",
+            cubature_order=3,
+            proc_loss=GaussianLoss(),
+            meas_loss=GVI_LOSS_FUN,
         )
     else:
         esgvi_graph = generate_esgvi_graph(
-            x0_state.copy(),
+            x0.copy(),
             P0=P0.copy(),
             init_info_matrix=esgvi_init_info,
-            input_data=input_data_lim,
-            meas_data=meas_data_lim,
+            input_data=inputs,
+            meas_data=measurements_gvi,
             process_model=proc_model,
-            proc_cubature=CUB_METHOD_PROC,
-            meas_cubature=CUB_METHOD_MEAS,
-            cubature_order=CUB_ORDER,
+            proc_cubature="gh",
+            meas_cubature="gh",
+            cubature_order=3,
             meas_loss=GVI_LOSS_FUN,
             proc_loss=GaussianLoss(),
         )
@@ -262,13 +219,13 @@ if __name__ == "__main__":
         est_list_gvi_raw.append(StateWithCovariance(state, cov))
 
     est_stamps_gvi = [float(x.state.stamp) for x in est_list_gvi_raw]
-    gt_stamps = [float(x.stamp) for x in gt_data_lim]
+    gt_stamps = [float(x.stamp) for x in gt_data]
     matches = nav.associate_stamps(est_stamps_gvi, gt_stamps)
     est_list_gvi = []
     gt_list = []
     for match in matches:
         est_list_gvi.append(est_list_gvi_raw[match[0]])
-        gt_list.append(gt_data_lim[match[1]])
+        gt_list.append(gt_data[match[1]])
 
     results_gvi = nav.GaussianResultList.from_estimates(est_list_gvi, gt_list)
 
@@ -331,8 +288,8 @@ if __name__ == "__main__":
     # Poses Plot
     fig, ax = nav.plot_poses(poses=pose_list_map, step=100, label="MAP")
     fig, ax = nav.plot_poses(pose_list_gvi, step=100, ax=ax, label="ESGVI")
-    fig, ax = nav.plot_poses(poses=gt_data_lim, ax=ax, step=None, label="Ground Truth")
-    for l in landmark_states:
+    fig, ax = nav.plot_poses(poses=gt_data, ax=ax, step=None, label="Ground Truth")
+    for l in landmarks:
         ax.plot(l.value[0], l.value[1], "x")
     ax.set_title("Estimated poses")
     ax.set_xlabel(r"$x$ (m)")

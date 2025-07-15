@@ -24,7 +24,8 @@ from navlie.lib.models import (
     PointRelativePosition,
 )
 from navlie.batch.residuals import ProcessResidual
-import jax.numpy as jnp 
+import jax.numpy as jnp
+
 
 def test_build_graph(end_time, noise=True, verbose=False, method="gh", order=3):
     np.random.seed(1)
@@ -177,9 +178,9 @@ def test_build_graph(end_time, noise=True, verbose=False, method="gh", order=3):
     start_time_my_sparse = timer()
     # Ensure the matrix is in sparse CSC format before passing to CHOLMOD
     K = esgvi_graph._information_matrix
-    
+
     start_time_sparse = timer()
-    if not hasattr(K, 'tocsc'):  # If it's a NumPy ndarray
+    if not hasattr(K, "tocsc"):  # If it's a NumPy ndarray
         K = csc_matrix(K)
     chol_factor = cholesky(K)
     covar_sparse = chol_factor.inv()
@@ -188,8 +189,7 @@ def test_build_graph(end_time, noise=True, verbose=False, method="gh", order=3):
     start_time_dense = timer()
     cov_dense_np = scipy.linalg.inv(esgvi_graph._information_matrix)
     time_dense_inv = timer() - start_time_dense
-    
-    
+
     print(esgvi_graph._covariance_matrix)
     print(covar_sparse.toarray())
     print(np.allclose(esgvi_graph._covariance_matrix, covar_sparse_my))
@@ -271,5 +271,3 @@ if __name__ == "__main__":
     test_build_graph(end_time=0.3)
     # test_esgvi_update()
     # test_esgvi_backtrack()
-
-
