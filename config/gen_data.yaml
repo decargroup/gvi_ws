@@ -1,5 +1,4 @@
 dataset: "se2"
-max_time: 20
 
 P0_mult: 1e-3
 R0_mult: 1e-2

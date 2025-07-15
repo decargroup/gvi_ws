@@ -2,7 +2,7 @@
 
 # Simulation Params
 SEED: 1
-T_END: 1.0
+T_END: 2.0
 MEAS_MODEL: "range_point" # "range_pose" # "relative_pos"
 NOISE: true
 USE_FIT: false

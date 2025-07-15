@@ -88,37 +88,17 @@ if __name__ == "__main__":
     meas_data_gvi = data["meas_data_non_gauss"]
     meas_stamps = [meas.stamp for meas in meas_data_map]
 
-    # If limit on poses wanted
+    if USE_FIT and GVI_LOSS_FUN == "skew_laplace":
+        for i in range(len(meas_data_map)):
+            meas_map = meas_data_map[i]
+            meas_gvi = meas_data_gvi[i]
 
-    input_data_lim = [u for u in input_data if u.stamp <= T_END]
-    input_stamps = [u.stamp for u in input_data]
-    match_inputs_meas = nav.associate_stamps(
-        input_stamps, meas_stamps, max_difference=0.005
-    )
-    inputs = []
-    measurements_map = []
-    measurements_gvi = []
-    for match in match_inputs_meas:
-        inputs.append(input_data[match[0]])
-        meas_gvi = meas_data_gvi[match[1]]
-        meas_map = meas_data_map[match[1]]
-
-        # Change noise params to the fitted ones
-        if USE_FIT and GVI_LOSS_FUN == "skew_laplace":
             std_dev_gauss = fitted_noise_dict["Gaussian"][1]
             std_dev_gvi = fitted_noise_dict["Skew Laplace"][1]
             skew_lambda_gvi = fitted_noise_dict["Skew Laplace"][2]
             GVI_LOSS_FUN = SkewLaplaceLoss(lamb=skew_lambda_gvi)
             meas_map.model._R = np.array([std_dev_gauss**2])
             meas_gvi.model._R = np.array([std_dev_gvi**2])
-
-        measurements_map.append(meas_map)
-        measurements_gvi.append(meas_gvi)
-
-    match_inputs_gt = nav.associate_stamps(input_stamps, gt_stamps, max_difference=0.01)
-    ground_truth = []
-    for match in match_inputs_gt:
-        ground_truth.append(gt_data[match[1]])
 
     if NOISE:
         x0_state = x0.plus(nav.randvec(P0))
@@ -129,9 +109,9 @@ if __name__ == "__main__":
     problem, init_pose_est = construct_planar_map(
         x0=x0.copy(),
         P0=P0.copy(),
-        input_data=inputs,
+        input_data=input_data,
         process_model=proc_model,
-        meas_data=measurements_map,
+        meas_data=meas_data_map,
         loss_fun=MAP_LOSS_FUN,
         slam=False,
         step_tol=STEP_TOL,
@@ -193,8 +173,8 @@ if __name__ == "__main__":
             x0.copy(),
             P0=P0.copy(),
             init_info_matrix=esgvi_init_info,
-            input_data=inputs,
-            meas_data=measurements_gvi,
+            input_data=input_data,
+            meas_data=meas_data_gvi,
             process_model=proc_model,
             proc_cubature="gh",
             meas_cubature="gh",
@@ -290,7 +270,7 @@ if __name__ == "__main__":
     fig, ax = nav.plot_poses(pose_list_gvi, step=100, ax=ax, label="ESGVI")
     fig, ax = nav.plot_poses(poses=gt_data, ax=ax, step=None, label="Ground Truth")
     for l in landmarks:
-        ax.plot(l.value[0], l.value[1], "x")
+        ax.plot(l[0], l[1], "x")
     ax.set_title("Estimated poses")
     ax.set_xlabel(r"$x$ (m)")
     ax.set_ylabel(r"$y$ (m)")

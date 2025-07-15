@@ -149,7 +149,7 @@ if __name__ == "__main__":
 
     # Data Params
     np.random.seed(config["SEED"])
-    MAX_TIME = gen_data_config["max_time"]
+    MAX_TIME = config["T_END"]
     NOISE = config["NOISE"]
 
     # Noise Params
