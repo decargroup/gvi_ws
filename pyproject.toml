@@ -1,0 +1,18 @@
+[project]
+name = "gvi_ws"
+version = "0.1.0"
+description = "Implementation of a Gaussian Variational Inference algorithm for state-estimation in Robotics."
+authors = [
+    { name="Andrew Stirling", email="andrew.stirling2@mail.mcgill.ca" }
+]
+dependencies = [
+    "navlie @ git+https://github.com/decargroup/navlie@main",
+    "matplotlib==3.10.3",
+    "numpy==2.2.6",
+    "scipy==1.15.3",
+    "seaborn==0.13.2",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

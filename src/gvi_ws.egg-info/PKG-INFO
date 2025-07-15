@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: gvi_ws
+Version: 0.1.0
+Summary: Implementation of a Gaussian Variational Inference algorithm for state-estimation in Robotics.
+Author-email: Andrew Stirling <andrew.stirling2@mail.mcgill.ca>
+Requires-Dist: navlie@ git+https://github.com/decargroup/navlie@main
+Requires-Dist: matplotlib==3.10.3
+Requires-Dist: numpy==2.2.6
+Requires-Dist: scipy==1.15.3
+Requires-Dist: seaborn==0.13.2

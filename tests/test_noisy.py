@@ -1,16 +1,4 @@
 # %%
-import os
-import sys
-
-# Get the absolute path of the project root (one level above "test")
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-# Change the working directory to the project root
-os.chdir(PROJECT_ROOT)
-
-# Add project root to sys.path so Python finds 'src'
-sys.path.insert(0, PROJECT_ROOT)
-
 import numpy as np
 import scipy.linalg
 import navlie as nav
@@ -19,18 +7,18 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Ellipse
 from typing import List, Dict
 
-from src.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
-from src.models.models import LaserRangeFinder
-from src.util.psd import force_sym_PSD
+from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
+from gvi_ws.models.models import LaserRangeFinder
+from gvi_ws.util.psd import force_sym_PSD
 from navlie.types import State, StateWithCovariance, Measurement, Input
 from navlie.lib.states import MatrixLieGroupState, SE2State, VectorState
 from navlie.filters import generate_sigmapoints
-from src.util.cubatures import (
+from gvi_ws.util.cubatures import (
     student_t_cubature,
     gh_cubature,
     trans_gh_cubature, 
     )
-from src.util.psd import (
+from gvi_ws.util.psd import (
     force_sym_PSD,
     force_sym,
 )

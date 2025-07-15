@@ -1,0 +1,20 @@
+SEED: 1
+T_END: 2.0
+LINEAR: False
+STEREO: True
+NOISE: True
+SP_METHOD_PROC: "gh"
+SP_METHOD_MEAS: "gh"
+CUB_ORDER: 3
+MAP_INIT: False
+TIME_IT: False
+STEP_TOL: 1.0e-08
+# ESGVI params
+VERBOSE: True
+MAX_ITERS: 10
+BACK_ITERS: 10
+INIT_STEP_SIZE: 1.0e0
+
+# Script Params
+SAVE_FIGS: True
+SHOW_FIGS: True

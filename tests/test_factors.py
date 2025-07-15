@@ -1,22 +1,10 @@
-import os
-import sys
-
-# Get the absolute path of the project root (one level above "test")
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-# Change the working directory to the project root
-os.chdir(PROJECT_ROOT)
-
-# Add project root to sys.path so Python finds 'src'
-sys.path.insert(0, PROJECT_ROOT)
-
 import numpy as np
 import scipy.linalg
 import navlie as nav
 from typing import List
-from src.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
-from src.models.models import LaserRangeFinder, DoubleIntegrator
-from src.util.psd import (
+from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
+from gvi_ws.models.models import LaserRangeFinder, DoubleIntegrator
+from gvi_ws.util.psd import (
     force_sym_PSD,
     force_sym,
     regularize,

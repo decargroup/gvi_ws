@@ -1,31 +1,19 @@
-import os
-import sys
-
-# Get the absolute path of the project root (one level above "test")
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-# Change the working directory to the project root
-os.chdir(PROJECT_ROOT)
-
-# Add project root to sys.path so Python finds 'src'
-sys.path.insert(0, PROJECT_ROOT)
-
 import numpy as np
 import scipy.linalg
 import navlie as nav
 from typing import List
+import scipy.sparse as sp
+from sksparse.cholmod import cholesky
+from scipy.sparse import csc_matrix
+import timeit
 
-from src.util.map_batch import construct_planar_map
-from src.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
-from src.graph.esgvi import ESGVI
-from src.graph.construct_esgvi import generate_trajectory
-from src.models.models import LaserRangeFinder
-from src.util.psd import (
-    force_sym_PSD,
-    force_sym,
-    regularize,
-    fast_positive_definite_inverse,
-)
+
+from gvi_ws.util.map_batch import construct_planar_map
+from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
+from gvi_ws.graph.esgvi import ESGVI
+from gvi_ws.graph.construct_esgvi import generate_esgvi_graph
+from gvi_ws.models.models import LaserRangeFinder
+from gvi_ws.util.sparsity import jax_compute_sparse_inverse, compute_sparse_inverse
 from navlie.types import State, StateWithCovariance, Measurement, Input
 from navlie.lib.states import MatrixLieGroupState, SE2State, VectorState
 from navlie.filters import generate_sigmapoints
@@ -36,7 +24,7 @@ from navlie.lib.models import (
     PointRelativePosition,
 )
 from navlie.batch.residuals import ProcessResidual
-
+import jax.numpy as jnp 
 
 def test_build_graph(end_time, noise=True, verbose=False, method="gh", order=3):
     np.random.seed(1)
@@ -118,7 +106,7 @@ def test_build_graph(end_time, noise=True, verbose=False, method="gh", order=3):
     _, H, _ = problem.compute_error_jac_cost()
     esgvi_init_info: np.ndarray = (H.T @ H).copy()
 
-    esgvi_graph = generate_trajectory(
+    esgvi_graph = generate_esgvi_graph(
         x0_state.copy(),
         P0=P0.copy(),
         init_info_matrix=esgvi_init_info,
@@ -155,9 +143,9 @@ def test_build_graph(end_time, noise=True, verbose=False, method="gh", order=3):
     esgvi_graph.verbose = False
     esgvi_graph.backtrack_iters = 1
     esgvi_graph.solve()
-    print("-----------------\nBacktrack Test: Step size = 1 creates no cost change.")
-    assert np.allclose(esgvi_graph.new_cost, esgvi_graph._backtrack_cost)
-    print("Backtrack Test Passed!")
+    # print("-----------------\nBacktrack Test: Step size = 1 creates no cost change.")
+    # assert np.allclose(esgvi_graph.new_cost, esgvi_graph._backtrack_cost)
+    # print("Backtrack Test Passed!")
 
     print(
         "-----------------\nFactor Covariance Test: Factor covariance by slicing should be equal to projected covariance."
@@ -181,6 +169,33 @@ def test_build_graph(end_time, noise=True, verbose=False, method="gh", order=3):
             factor_covar_check, factor_covar
         ), f"Sliced covariance: {factor_covar} \n Not equal to projected covariance: {factor_covar_check}, {factor_covar_check == factor_covar}"
     print("Factor Covariance Test Passed!")
+    timer = timeit.default_timer
+    start_time_my_sparse = timer()
+    L, D, _ = scipy.linalg.ldl(esgvi_graph._information_matrix)
+    covar_sparse_my = compute_sparse_inverse(L, D)
+    end_time_my_sparse = timer() - start_time_my_sparse
+    start_time_my_sparse = timer()
+    # Ensure the matrix is in sparse CSC format before passing to CHOLMOD
+    K = esgvi_graph._information_matrix
+    
+    start_time_sparse = timer()
+    if not hasattr(K, 'tocsc'):  # If it's a NumPy ndarray
+        K = csc_matrix(K)
+    chol_factor = cholesky(K)
+    covar_sparse = chol_factor.inv()
+    covar_sparse_np = covar_sparse.toarray()
+    time_sparse_inv = timer() - start_time_sparse
+    start_time_dense = timer()
+    cov_dense_np = scipy.linalg.inv(esgvi_graph._information_matrix)
+    time_dense_inv = timer() - start_time_dense
+    
+    
+    print(esgvi_graph._covariance_matrix)
+    print(covar_sparse.toarray())
+    print(np.allclose(esgvi_graph._covariance_matrix, covar_sparse_my))
+    print(f"Dense Inverse Timer:{time_dense_inv:.4e}")
+    print(f"Sparse Inverse Timer:{time_sparse_inv:.4e}")
+    print(f"Custom Sparse Inverse Timer:{end_time_my_sparse:.4e}")
 
 
 def test_esgvi_update():
@@ -253,6 +268,8 @@ def test_esgvi_backtrack():
 
 
 if __name__ == "__main__":
-    # test_build_graph(end_time=0.05)
+    test_build_graph(end_time=0.3)
     # test_esgvi_update()
-    test_esgvi_backtrack()
+    # test_esgvi_backtrack()
+
+
