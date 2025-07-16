@@ -1,10 +1,12 @@
 dataset: "se2"
+max_time: 20
 
 P0_mult: 1e-3
 R0_mult: 1e-2
 
 # se2
 Q0_mult: [0.01, 0.1, 0.05]
+
 # 2D
 # Q0_mult: [0.1, 0.1]
 
@@ -14,10 +16,12 @@ x0_pos: [0, 0, 0]
 # 2D
 # x0_pos: [0, 0]
 
-anchor_pos: [[2, 1], [0, 1], [2, 0]]
+proc_model: "body_frame_velocity"
+meas_model: "range_pose" # "range_point"
 
-proc_model: "single_integrator"
-meas_model: "range_point"
+anchor_pos: [[2, 1], [0, 1], [2, 0]]
+# Tag Body Pos
+tag_pos: [0.1, 0.1]
 
 save_figs: False
 show_figs: True

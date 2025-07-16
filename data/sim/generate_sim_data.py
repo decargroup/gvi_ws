@@ -23,7 +23,13 @@ from navlie.types import (
     Input,
     Measurement,
 )
-from navlie.lib.models import SingleIntegrator, DoubleIntegrator, RangePointToAnchor
+from navlie.lib.models import (
+    SingleIntegrator,
+    DoubleIntegrator,
+    BodyFrameVelocity,
+    RangePointToAnchor,
+    RangePoseToAnchor,
+)
 from navlie.lib.states import VectorInput
 from navlie.batch.losses import L2Loss, CauchyLoss
 from gvi_ws.util.fit_skew_laplace import fit_skew_laplace, skew_laplace_pdf
@@ -110,8 +116,12 @@ if __name__ == "__main__":
     proc_model_dict: dict[str, ProcessModel] = {
         "single_integrator": SingleIntegrator,
         "double_integrator": DoubleIntegrator,
+        "body_frame_velocity": BodyFrameVelocity,
     }
-    meas_model_dict: dict[str, MeasurementModel] = {"range_point": RangePointToAnchor}
+    meas_model_dict: dict[str, MeasurementModel] = {
+        "range_point": RangePointToAnchor,
+        "range_pose": RangePoseToAnchor,
+    }
     Q0_mult = gen_data_config["Q0_mult"]
     P0_mult = float(gen_data_config["P0_mult"])
     R0_mult = float(gen_data_config["R0_mult"])
@@ -132,10 +142,19 @@ if __name__ == "__main__":
     x0 = state(value=np.array(x0_pos), stamp=0.0, state_id="x0")
     P0 = np.identity(dof) * P0_mult
 
-    meas_model = meas_model_dict[gen_data_config["meas_model"]]
-    meas_model = [
-        meas_model(anchor_position=anchor_pos, R=R_d) for anchor_pos in anchor_pos_list
-    ]
+    meas_model_str = gen_data_config["meas_model"]
+    meas_model = meas_model_dict[meas_model_str]
+    if meas_model_str == "range_point":
+        meas_model = [
+            meas_model(anchor_position=anchor_pos, R=R_d)
+            for anchor_pos in anchor_pos_list
+        ]
+    elif meas_model_str == "range_pose":
+        tag_pos = np.array(gen_data_config["tag_pos"])
+        meas_model = [
+            meas_model(anchor_position=anchor_pos, tag_body_position=tag_pos, R=R_d)
+            for anchor_pos in anchor_pos_list
+        ]
     meas_freq = 10
     proc_model = proc_model_dict[gen_data_config["proc_model"]]
     proc_model = proc_model(Q=Q_d)
@@ -149,7 +168,7 @@ if __name__ == "__main__":
 
     # Data Params
     np.random.seed(config["SEED"])
-    MAX_TIME = config["T_END"]
+    MAX_TIME = gen_data_config["max_time"]
     NOISE = config["NOISE"]
 
     # Noise Params

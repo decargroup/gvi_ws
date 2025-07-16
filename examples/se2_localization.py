@@ -41,7 +41,6 @@ if __name__ == "__main__":
     CUB_ORDER = config["CUB_ORDER"]
     MAP_INIT = config["MAP_INIT"]
     TIME_IT = config["TIME_IT"]
-    MEAS_MODEL = config["MEAS_MODEL"]
 
     VERBOSE = config["VERBOSE"]
     MAX_ITERS = config["MAX_ITERS"]
@@ -81,14 +80,20 @@ if __name__ == "__main__":
     fitted_noise_dict = data["fitted_noise_params"]
     landmarks = data["landmarks"]
 
-    gt_data = data["ground_truth"]
+    gt_data: List[SE2State] = data["ground_truth"]
+    gt_data = [s for s in gt_data if s.stamp < T_END]
     gt_stamps = [gt.stamp for gt in gt_data]
     input_data: List[Input] = data["input_data"]
-    meas_data_map = data["meas_data_non_gauss"]
-    meas_data_gvi = data["meas_data_non_gauss"]
+    input_data = [u for u in input_data if u.stamp < T_END]
+
+    meas_data_map: List[Measurement] = data["meas_data_non_gauss"]
+    meas_data_map = [m for m in meas_data_map if m.stamp < T_END]
+
+    meas_data_gvi: List[Measurement] = data["meas_data_non_gauss"]
+    meas_data_gvi = [m for m in meas_data_gvi if m.stamp < T_END]
     meas_stamps = [meas.stamp for meas in meas_data_map]
 
-    if USE_FIT and GVI_LOSS_FUN == "skew_laplace":
+    if USE_FIT and isinstance(GVI_LOSS_FUN, SkewLaplaceLoss):
         for i in range(len(meas_data_map)):
             meas_map = meas_data_map[i]
             meas_gvi = meas_data_gvi[i]
@@ -298,14 +303,14 @@ if __name__ == "__main__":
         plt.show()
 
     # Comparison table
-    print("Average Error: ")
-    print(" Method | Heading  |    X    |   Y ")
+    print("Estimation Performance")
+    print(" Method | RMSE (rad) |  RMSE (m)  |  aNEES")
     print("----------------------------------------")
     print(
-        f" ESGVI  | {np.mean(results_gvi.error[:,0]):.5f} | {np.mean(results_gvi.error[:,1]):.5f} | {np.mean(results_gvi.error[:,2]):.5f}"
+        f" ESGVI  |  {np.sqrt(np.mean(np.square(results_gvi.error[:,0]))):.5f}   |  {np.sqrt(np.mean(np.square(results_gvi.error[:,1:]))):.5f}   |  {(np.mean(results_gvi.nees/results_gvi.dof)):.5f}"
     )
     print(
-        f" MAP    | {np.mean(results_map.error[:,0]):.5f} | {np.mean(results_map.error[:,1]):.5f} | {np.mean(results_map.error[:,2]):.5f}"
+        f" MAP    |  {np.sqrt(np.mean(np.square(results_map.error[:,0]))):.5f}   |  {np.sqrt(np.mean(np.square(results_map.error[:,1:]))):.5f}   |  {(np.mean(results_map.nees/results_map.dof)):.5f}"
     )
     print(" -------------------------- ")
     print(f"Total degrees of freedom x: {esgvi_graph._graph_total_dof}")

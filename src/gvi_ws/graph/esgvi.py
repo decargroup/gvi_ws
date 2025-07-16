@@ -207,6 +207,7 @@ class ESGVI:
                 self._prev_states = {k: v.copy() for k, v in self.states.items()}
                 self.cost_history.append(self.new_cost)
                 self.prev_cost = self.new_cost
+                n_iters += 1
             else:
                 backtrack_success, new_info, new_covar = self.backtrack(
                     new_info,
@@ -215,14 +216,21 @@ class ESGVI:
                     alpha_multiplier=self.backtrack_multiplier,
                 )
                 if backtrack_success:
-                    self._information_matrix = new_info
-                    self._covariance_matrix = new_covar
-                    self._prev_states = {k: v.copy() for k, v in self.states.items()}
-                    self.cost_history.append(self.new_cost)
-                    self.prev_cost = self.new_cost
+                    n_iters += 1
+                    if self.is_converged(
+                        self._delta_mean, new_info, new_covar, n_iters
+                    ):
+                        return self.states
+                    else:
+                        self._information_matrix = new_info
+                        self._covariance_matrix = new_covar
+                        self._prev_states = {
+                            k: v.copy() for k, v in self.states.items()
+                        }
+                        self.cost_history.append(self.new_cost)
+                        self.prev_cost = self.new_cost
                 else:
                     return self._prev_states
-            n_iters += 1
 
     def update_states(
         self,
@@ -319,7 +327,7 @@ class ESGVI:
         delta_covar = force_sym(new_covar - self._covariance_matrix)
         # assert isPD(delta_info), "Delta Info is not positive-definite"
         # assert isPD(delta_covar), "Delta Covar is not positive-definite"
-        # TODO: Try this for faster as inverse is linear
+        # TODO: Try this for faster
         # delta_covar = force_sym_PSD(new_covar -self._covariance_matrix)
 
         # Backtracking values
@@ -357,6 +365,7 @@ class ESGVI:
                 self.last_alpha = alpha
                 self.new_cost = self._backtrack_cost
                 self.states = {k: v.copy() for k, v in self._backtrack_states.items()}
+                self._delta_mean = backtrack_delta_mean
                 return True, backtrack_info, backtrack_covar
             else:
                 alpha *= alpha_multiplier
