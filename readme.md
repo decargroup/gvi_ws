@@ -32,7 +32,8 @@ pip install -e .
 
 ### Running Simulations
 
-1. **Generate simulation data**  
+1. **Generate simulation data.** 
+   
 From the project root, run:
 
 ```bash
@@ -40,16 +41,18 @@ python data/sim/generate_sim_data.py
 ```
 To configure the simulation parameters, change the ``config/gen_data.yaml``, and ``config/noise_config.yaml`` files.
 
-2. **Run the estimators**
+2. **Run the estimators.**
+
 If you generated an SE(2) simulation, run
 
 ```bash
 python examples/se2_localization.py
 ```
-Similarly, change estimator params in ``config/se2_localization.yaml``. 
 
-This will generate output data (pickled objects) and save them to the data/results/se2/ folder.
-3. **Plotting**
+This will generate output data (pickled objects) and save them to the data/results/se2/ folder. Similarly, to change the estimator parameters, consult ``config/se2_localization.yaml``. 
+
+3. **Plotting.**
+
 To plot the results, run:
 
 ```bash
