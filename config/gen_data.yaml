@@ -23,6 +23,6 @@ anchor_pos: [[2, 1], [0, 1], [2, 0]]
 # Tag Body Pos
 tag_pos: [0.1, 0.1]
 
-save_figs: False
+save_figs: True
 show_figs: True
-export: True
+export: False

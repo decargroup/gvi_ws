@@ -2,7 +2,7 @@
 
 # Simulation Params
 SEED: 1
-T_END: 3.3
+T_END: 1.5
 NOISE: true
 USE_FIT: true
 SP_METHOD_PROC: "gh" # Sigma point method for process/prior factors.
@@ -14,10 +14,16 @@ TIME_IT: false
 # ESGVI Params
 VERBOSE: true
 MAX_ITERS: 5
-BACK_ITERS: 20
+BACK_ITERS: 0
 INIT_STEP_SIZE: 1e-10
 STEP_TOL: 1e-6
 
 # Script Params
-SAVE_FIGS: true
+SAVE_FIGS: false
 SHOW_FIGS: true
+
+# Results params
+USE_MAP: true
+USE_GVI: true
+USE_GMM: true
+EXPORT: true

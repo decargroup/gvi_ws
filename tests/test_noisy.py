@@ -2,6 +2,7 @@
 import numpy as np
 import scipy.linalg
 import navlie as nav
+import scipy.stats
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Ellipse
@@ -25,6 +26,8 @@ from gvi_ws.util.psd import (
 )
 from navlie.lib.models import BodyFrameVelocity, LinearMeasurement
 from gvi_ws.util.fit_skew_laplace import fit_skew_laplace, skew_laplace_pdf
+from scipy.stats import norm, cauchy
+from sklearn.mixture import GaussianMixture
 
 
 def test_student_t_meas_factor(verbose=False, method="gh", order=3):
@@ -159,7 +162,8 @@ if __name__ == "__main__":
     # samples = sample_skew_laplace(
     #     mu=np.zeros((1, 1)), sigma=np.sqrt(np.array([[0.05]])), lam=0.1, n_samples=10000
     # )
-    std_dev_true = np.array([[0.2]])
+    R = np.array([[1e-2]])
+    std_dev_true = np.sqrt(R)
     samples = randvec(
         cov=np.square(std_dev_true), num_samples=10000, method="skew_laplace"
     )
@@ -169,22 +173,108 @@ if __name__ == "__main__":
     ax.hist(
         samples,
         bins="fd",
-        alpha=0.6,
-        color="grey",
+        alpha=0.3,
+        color="tab:grey",
         edgecolor="black",
         density=True,
     )
+    ax.set_xlabel("Measurement Error")
+    ax.set_ylabel("Probability")
     mu_sl, std_sl, lambda_sl = fit_skew_laplace(samples)
-    # X-range for PDFs
-    x = np.linspace(-1, 2, 500)
-    pdf_sl = skew_laplace_pdf(x, mu_sl, std_sl, lambda_sl)
+    x = np.linspace(-1, 4, 500)
+    pdf_sl = skew_laplace_pdf(x, mu=mu_sl, sigma=std_sl, lam=lambda_sl)
+    pdf_sl_true = skew_laplace_pdf(x, mu=0, sigma=std_dev_true[0, 0], lam=0.1)
+    # Fit GMM
+    # Mixture Model
+    gmm = GaussianMixture(n_components=3, covariance_type="diag", random_state=0)
+    gmm.fit(np.array(samples).reshape((-1, 1)))
+    # Compute mixture pdf
+    logprob = gmm.score_samples(x.reshape((-1, 1)))
+    pdf_gmm = np.exp(logprob)
+
+    gmm_means = gmm.means_.flatten()
+    gmm_stds = np.sqrt(gmm.covariances_.flatten())
+    gmm_weights = gmm.weights_
+    idx_sort = np.argsort(gmm_weights)[::-1]
+
+    means_str = ", ".join(f"{gmm_means[i]:.2f}" for i in idx_sort)
+    stds_str = ", ".join(f"{gmm_stds[i]:.2f}" for i in idx_sort)
+    weights_str = ", ".join(f"{gmm_weights[i]:.2f}" for i in idx_sort)
+    ax.plot(
+        x,
+        pdf_sl_true,
+        "-",
+        linewidth=2,
+        color="tab:green",
+        label=f"True Skew-Laplace\nμ={0.00}, σ={std_dev_true[0,0]:.2f}, λ={0.100}",
+    )
     ax.plot(
         x,
         pdf_sl,
         "--",
         linewidth=2,
-        color="tab:green",
+        color="tab:red",
         label=f"Skew-Laplace Fit\nμ={mu_sl:.2f}, σ={std_sl:.2f}, λ={lambda_sl:.3f}",
     )
+    # Plot GMM PDF
+    ax.plot(
+        x,
+        pdf_gmm,
+        "-.",
+        linewidth=2,
+        color="tab:purple",
+        label=f"Gaussian Mixture Fit\nμ=[{means_str}]\nσ=[{stds_str}]\nw=[{weights_str}]",
+    )
+    print(gmm_means)
+    print(gmm_stds)
+    print(gmm_weights)
+    # Generating presentation figure
+    # x = np.linspace(-1, 4, 500)
+    # pdf_sl = skew_laplace_pdf(x, mu=-0.05, sigma=0.3, lam=0.6)
+    # pdf_gauss = scipy.stats.norm.pdf(x, 0.1, 0.17)
+    # pdf_gauss_1 = scipy.stats.norm.pdf(x, 0.5, 0.25)
+    # pdf_gauss_2 = scipy.stats.norm.pdf(x, 1, 0.35)
+    # pdf_gauss_3 = scipy.stats.norm.pdf(x, 1.5, 0.55)
+
+    # ax.plot(
+    #     x,
+    #     pdf_gauss,
+    #     "--",
+    #     linewidth=2,
+    #     color="tab:green",
+    # )
+    # ax.plot(
+    #     x,
+    #     pdf_gauss_1,
+    #     "--",
+    #     linewidth=2,
+    #     color="tab:red",
+    # )
+    # ax.plot(
+    #     x,
+    #     pdf_gauss_2,
+    #     "--",
+    #     linewidth=2,
+    #     color="tab:red",
+    # )
+    # ax.plot(
+    #     x,
+    #     pdf_gauss_3,
+    #     "--",
+    #     linewidth=2,
+    #     color="tab:red",
+    # )
+    # sl_amp = 3.5
+    # plt.fill_between(
+    #     x, pdf_sl * sl_amp, color="tab:blue", alpha=0.2, label="Skewed Covering Density"
+    # )
+    # ax.plot(
+    #     x,
+    #     pdf_sl * sl_amp,
+    #     "-",
+    #     linewidth=2,
+    #     color="tab:blue",
+    # )
     ax.legend(fontsize=10, loc="upper right", frameon=True)
+    fig.tight_layout()
     plt.show()

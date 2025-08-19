@@ -34,6 +34,7 @@ from navlie.lib.states import VectorInput
 from navlie.batch.losses import L2Loss, CauchyLoss
 from gvi_ws.util.fit_skew_laplace import fit_skew_laplace, skew_laplace_pdf
 from scipy.stats import norm, cauchy
+from sklearn.mixture import GaussianMixture
 
 
 def compute_meas_error(
@@ -94,7 +95,7 @@ def compute_meas_error(
         edgecolor="black",
         density=True,
     )
-    ax.set_title("Histogram of Measuremet Errors")
+    # ax.set_title("Histogram of Measurement Errors")
     ax.set_xlabel("Error (m)")
     ax.set_ylabel("Probability Density")
     fig.tight_layout()
@@ -229,12 +230,21 @@ if __name__ == "__main__":
     mu, std = norm.fit(meas_errors)
     mu_c, std_c = cauchy.fit(meas_errors)
     mu_sl, std_sl, lambda_sl = fit_skew_laplace(meas_errors)
+    # Mixture Model
+    gmm = GaussianMixture(n_components=3, covariance_type="diag", random_state=0)
+    gmm.fit(np.array(meas_errors).reshape((-1, 1)))
+
     # X-range for PDFs
     x = np.linspace(-1, 2, 500)
     pdf_gauss = norm.pdf(x, mu, std)
     pdf_cauchy = cauchy.pdf(x, mu_c, std_c)
+    # Compute skew laplace pdf
     pdf_sl = skew_laplace_pdf(x, mu_sl, std_sl, lambda_sl)
+    # Compute mixture pdf
+    logprob = gmm.score_samples(x.reshape((-1, 1)))
+    pdf_gmm = np.exp(logprob)
 
+    # Plot pdfs overtop of histogram
     axs_error.plot(
         x,
         pdf_gauss,
@@ -243,23 +253,43 @@ if __name__ == "__main__":
         color="tab:blue",
         label=f"Gaussian Fit\nμ={mu:.2f}, σ={std:.2f}",
     )
+    # axs_error.plot(
+    #     x,
+    #     pdf_cauchy,
+    #     "--",
+    #     linewidth=2,
+    #     color="tab:orange",
+    #     label=f"Cauchy Fit\nμ={mu_c:.2f}, σ={std_c:.2f}",
+    # )
+    gmm_means = gmm.means_.flatten()
+    gmm_stds = np.sqrt(gmm.covariances_.flatten())
+    gmm_weights = gmm.weights_
+    idx_sort = np.argsort(gmm_weights)[::-1]
+
+    means_str = ", ".join(f"{gmm_means[i]:.2f}" for i in idx_sort)
+    stds_str = ", ".join(f"{gmm_stds[i]:.2f}" for i in idx_sort)
+    weights_str = ", ".join(f"{gmm_weights[i]:.2f}" for i in idx_sort)
+
+    # Plot GMM PDF
     axs_error.plot(
         x,
-        pdf_cauchy,
-        "--",
+        pdf_gmm,
+        "-.",
         linewidth=2,
-        color="tab:orange",
-        label=f"Cauchy Fit\nμ={mu_c:.2f}, σ={std_c:.2f}",
+        color="tab:purple",
+        label=f"Gaussian Mixture Fit\nμ=[{means_str}]\nσ=[{stds_str}]\nw=[{weights_str}]",
     )
+    # Plot Skew-Laplace PDF
     axs_error.plot(
         x,
         pdf_sl,
         "--",
         linewidth=2,
-        color="tab:red",
+        color="tab:orange",
         label=f"Skew-Laplace Fit\nμ={mu_sl:.2f}, σ={std_sl:.2f}, λ={lambda_sl:.3f}",
     )
     pdf_sl_true = skew_laplace_pdf(x, mu=0, sigma=sigma_true[0, 0], lam=skew_lambda_gt)
+    # Plot the true Skew-Laplace PDF
     axs_error.plot(
         x,
         pdf_sl_true,
@@ -274,11 +304,19 @@ if __name__ == "__main__":
     noise_params = {
         "Gaussian": [mu, std],
         "Cauchy": [mu_c, std_c],
+        "GMM": [
+            gmm.means_.flatten().tolist(),
+            np.sqrt(gmm.covariances_.flatten().tolist()),
+            gmm.weights_.tolist(),
+        ],
         "Skew Laplace": [mu_sl, std_sl, lambda_sl],
     }
     if SAVE_FIGS:
-        plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/{dataset}_noise_comp.pdf"
+        fig.savefig(
+            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/{dataset}/noise_comp.pdf"
+        )
+        fig_error.savefig(
+            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/{dataset}/range_errors.pdf"
         )
     if SHOW_FIGS:
         plt.show()
