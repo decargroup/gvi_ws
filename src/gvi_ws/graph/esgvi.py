@@ -187,6 +187,7 @@ class ESGVI:
             new_info = force_sym_PSD(new_info)
 
             # TODO: Redo this using sparsity trick
+            # scipy's version is faster than self-implemented python version
             new_covar = force_sym_PSD(splg.inv(new_info))
 
             self._delta_mean = splg.solve(new_info, -phi_dx)
@@ -207,6 +208,7 @@ class ESGVI:
                 self._prev_states = {k: v.copy() for k, v in self.states.items()}
                 self.cost_history.append(self.new_cost)
                 self.prev_cost = self.new_cost
+                n_iters += 1
             else:
                 backtrack_success, new_info, new_covar = self.backtrack(
                     new_info,
@@ -215,14 +217,21 @@ class ESGVI:
                     alpha_multiplier=self.backtrack_multiplier,
                 )
                 if backtrack_success:
-                    self._information_matrix = new_info
-                    self._covariance_matrix = new_covar
-                    self._prev_states = {k: v.copy() for k, v in self.states.items()}
-                    self.cost_history.append(self.new_cost)
-                    self.prev_cost = self.new_cost
+                    n_iters += 1
+                    if self.is_converged(
+                        self._delta_mean, new_info, new_covar, n_iters
+                    ):
+                        return self.states
+                    else:
+                        self._information_matrix = new_info
+                        self._covariance_matrix = new_covar
+                        self._prev_states = {
+                            k: v.copy() for k, v in self.states.items()
+                        }
+                        self.cost_history.append(self.new_cost)
+                        self.prev_cost = self.new_cost
                 else:
                     return self._prev_states
-            n_iters += 1
 
     def update_states(
         self,
@@ -254,31 +263,6 @@ class ESGVI:
             state_slice = self.state_slices[key]
             state_delta_mean = delta_mean[state_slice, 0]
             new_states[key] = state.plus(state_delta_mean)
-            # Change the covariance and information values if on-manifold
-            # if update_covariance and isinstance(state, MatrixLieGroupState):
-            #     if state.direction == "left":
-            #         jac = state.group.left_jacobian(state_delta_mean)
-            #         jac_inv = state.group.left_jacobian_inv(state_delta_mean)
-            #     if state.direction == "right":
-            #         jac = state.group.right_jacobian(state_delta_mean)
-            #         jac_inv = state.group.right_jacobian_inv(state_delta_mean)
-
-            #     new_state_covar = covariance[state_slice, state_slice].copy()
-            #     new_state_info = information[state_slice, state_slice].copy()
-
-            #     # TODO: Should this be forced PSD?
-            #     # new_state_covar = jac_inv @ new_state_covar @ jac_inv.T
-            #     # new_state_info = jac.T @ new_state_info @ jac
-            #     # new_state_covar = force_sym_PSD(jac_inv @ new_state_covar @ jac_inv.T)
-            #     # new_state_info = force_sym_PSD(jac.T @ new_state_info @ jac)
-
-            #     covariance[state_slice, state_slice] = new_state_covar
-            #     information[state_slice, state_slice] = new_state_info
-
-        #  TODO: Check if this needs to be done for MLG States
-        # covariance = force_sym_PSD(covariance)
-        # information = force_sym_PSD(splg.inv(covariance))
-        # information = force_sym_PSD(information)
 
         return new_states, information, covariance
 
@@ -319,8 +303,6 @@ class ESGVI:
         delta_covar = force_sym(new_covar - self._covariance_matrix)
         # assert isPD(delta_info), "Delta Info is not positive-definite"
         # assert isPD(delta_covar), "Delta Covar is not positive-definite"
-        # TODO: Try this for faster as inverse is linear
-        # delta_covar = force_sym_PSD(new_covar -self._covariance_matrix)
 
         # Backtracking values
         alpha = init_step_dist if self.last_alpha is None else self.last_alpha
@@ -357,7 +339,9 @@ class ESGVI:
                 self.last_alpha = alpha
                 self.new_cost = self._backtrack_cost
                 self.states = {k: v.copy() for k, v in self._backtrack_states.items()}
+                self._delta_mean = backtrack_delta_mean
                 return True, backtrack_info, backtrack_covar
+
             else:
                 alpha *= alpha_multiplier
                 backtrack_delta_mean = alpha * self._delta_mean
@@ -369,6 +353,7 @@ class ESGVI:
                 )
 
         if self.verbose:
+            # TODO: Print better message
             print(
                 f"Backtracking didn't find suitable step size after {n_iters}. \nTry increasing backtracking iterations, or aggresiveness."
             )

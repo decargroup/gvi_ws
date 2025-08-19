@@ -226,11 +226,17 @@ def construct_gmm_map(
             meas_cp = Measurement(
                 meas.value.copy(), meas.stamp, model=meas.model, state_id=meas.state_id
             )
-            meas_cp.value = meas.value.copy() - means[mix_i]
-            meas_cp.model._R = covariances[mix_i]
-            meas_residual = MeasurementResidual(
+            # meas_cp.value = meas.value.copy() - means[mix_i]
+            # meas_cp.model._R = covariances[mix_i]
+            # meas_residual = MeasurementResidual(
+            #     [key_1],
+            #     meas_cp,
+            # )
+            meas_residual = BiasedMeasurementResidual(
                 [key_1],
-                meas_cp,
+                measurement=meas_cp,
+                mean=np.array(means[mix_i]),
+                covariance=covariances[mix_i],
             )
             component_residuals.append(meas_residual)
         gmm_residual = HessianSumMixtureResidual(
@@ -254,3 +260,58 @@ def extract_landmark_est(
         landmark_results_list.append(landmark_state_cov)
 
     return landmark_results_list
+
+
+class BiasedMeasurementResidual(MeasurementResidual):
+    """
+    Measurement residual class for residuals used in Gaussian mixtures, with non-zero means.
+    """
+
+    def __init__(
+        self, keys, measurement: Measurement, mean: np.ndarray, covariance: np.ndarray
+    ):
+        if not hasattr(measurement.model, "_R"):
+            raise ValueError("Measurement model needs covariance R assigned.")
+        measurement.model._R = covariance
+        super().__init__(keys, measurement)
+        self._bias_mean = mean
+
+    def evaluate(
+        self,
+        states: List[nav.State],
+        compute_jacobians: List[bool] = None,
+    ) -> Tuple[np.ndarray, List[np.ndarray]]:
+        """
+        Evaluates the measurement residual.
+
+        The error is computed as
+
+        .. math::
+            \mathbf{e} = \mathbf{y} - \mathbf{g} (\mathbf{x}).
+
+        The Jacobian of the residual with respect to the state
+        is then the negative of the measurement model Jacobian.
+        """
+        # Extract state
+        x = states[0]
+
+        # Compute predicted measurement
+        y_check = self._y.model.evaluate(x)
+        e = (
+            self._y.value.reshape((-1, 1))
+            - y_check.reshape((-1, 1))
+            - self._bias_mean.reshape((-1, 1))
+        )
+
+        # Weight error by square root of information matrix
+        L = self._y.model.sqrt_information(x)
+        e = L.T @ e
+
+        if compute_jacobians:
+            jacobians = [None] * len(states)
+
+            if compute_jacobians[0]:
+                jacobians[0] = -L.T @ self._y.model.jacobian(x)
+            return e, jacobians
+
+        return e

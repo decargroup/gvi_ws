@@ -1,10 +1,10 @@
 # Parameters for SE2 Localization Example
 
 # Simulation Params
-seed: 1
-T_END: 1.0
-MEAS_MODEL: "range_pose" # "range_point" # "range_pose" # "relative_pos"
+SEED: 1
+T_END: 1.5
 NOISE: true
+USE_FIT: true
 SP_METHOD_PROC: "gh" # Sigma point method for process/prior factors.
 SP_METHOD_MEAS: "gh" # Sigma point method for measurement factors.
 CUB_ORDER: 3
@@ -15,9 +15,15 @@ TIME_IT: false
 VERBOSE: true
 MAX_ITERS: 5
 BACK_ITERS: 0
-INIT_STEP_SIZE: 1e0
-STEP_TOL: 1e-8
+INIT_STEP_SIZE: 1e-10
+STEP_TOL: 1e-6
 
 # Script Params
 SAVE_FIGS: false
 SHOW_FIGS: true
+
+# Results params
+USE_MAP: true
+USE_GVI: true
+USE_GMM: true
+EXPORT: true
