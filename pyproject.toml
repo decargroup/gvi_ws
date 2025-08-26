@@ -17,8 +17,8 @@ dependencies = [
     "seaborn==0.13.2",
 
     # Project-specific external deps
-    "navlie @ git+https://github.com/decargroup/navlie@effb2fefc45cb06ff97ff4f787bda8e240686578",
-    "pymlg @ git+https://github.com/decargroup/pymlg@e0bfac968180713aaf06a19a0ddb634a83945258",
+    "navlie @ git+https://github.com/decargroup/navlie@main",
+    "pymocap @ git+ssh://git@github.com/andrewipstirling/pymocap.git@main",
     "bagpy==0.5",
     "rosbags==0.10.10",
     "rospkg==1.6.0",
@@ -29,6 +29,10 @@ dependencies = [
     "PyYAML==6.0.2",
     "tqdm==4.67.1",
 ]
+
+# Local subpackage install
+[tool.poetry.dependencies]
+pymocap = { path = "pymocap", develop = true }
 
 [build-system]
 requires = ["setuptools>=61.0"]

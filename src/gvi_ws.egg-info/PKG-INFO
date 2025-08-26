@@ -3,8 +3,20 @@ Name: gvi_ws
 Version: 0.1.0
 Summary: Implementation of a Gaussian Variational Inference algorithm for state-estimation in Robotics.
 Author-email: Andrew Stirling <andrew.stirling2@mail.mcgill.ca>
-Requires-Dist: navlie@ git+https://github.com/decargroup/navlie@main
-Requires-Dist: matplotlib==3.10.3
 Requires-Dist: numpy==2.2.6
 Requires-Dist: scipy==1.15.3
+Requires-Dist: pandas==2.2.3
+Requires-Dist: scikit-learn==1.7.0
+Requires-Dist: scikit-sparse==0.4.16
+Requires-Dist: matplotlib==3.10.3
 Requires-Dist: seaborn==0.13.2
+Requires-Dist: navlie@ git+https://github.com/decargroup/navlie@main
+Requires-Dist: bagpy==0.5
+Requires-Dist: rosbags==0.10.10
+Requires-Dist: rospkg==1.6.0
+Requires-Dist: py3rosmsgs==1.18.2
+Requires-Dist: evo==1.31.1
+Requires-Dist: csaps==1.3.2
+Requires-Dist: ruamel.yaml==0.18.10
+Requires-Dist: PyYAML==6.0.2
+Requires-Dist: tqdm==4.67.1
