@@ -6,6 +6,7 @@ from scipy.interpolate import interp1d
 import csv
 import os
 import pickle
+import seaborn as sns
 
 from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
 from gvi_ws.graph.esgvi import ESGVI
@@ -106,6 +107,13 @@ def compute_meas_error(
 EXP_PATH = "./data/sim/"
 
 if __name__ == "__main__":
+    # Plotting parameters
+    plt.rc("text", usetex=True)
+    plt.rc("font", family="serif", size=14)
+    plt.rc("lines", linewidth=2)
+    plt.rc("axes", grid=True)
+    plt.rc("grid", linestyle="--")
+    sns.set_theme(style="whitegrid")
     # Dataset
     gen_data_config = load_config("config/gen_data.yaml")
     dataset = gen_data_config["dataset"]
@@ -251,7 +259,7 @@ if __name__ == "__main__":
         "--",
         linewidth=2,
         color="tab:blue",
-        label=f"Gaussian Fit\nμ={mu:.2f}, σ={std:.2f}",
+        label=rf"Gaussian Fit\\ $\mu={mu:.2f},\ \sigma={std:.2f}$",
     )
     # axs_error.plot(
     #     x,
@@ -277,7 +285,7 @@ if __name__ == "__main__":
         "-.",
         linewidth=2,
         color="tab:purple",
-        label=f"Gaussian Mixture Fit\nμ=[{means_str}]\nσ=[{stds_str}]\nw=[{weights_str}]",
+        label=rf"Gaussian Mixture Fit\\ $\mu=[{means_str}]$\\ $\sigma=[{stds_str}]$\\ $w=[{weights_str}]$",
     )
     # Plot Skew-Laplace PDF
     axs_error.plot(
@@ -286,7 +294,7 @@ if __name__ == "__main__":
         "--",
         linewidth=2,
         color="tab:orange",
-        label=f"Skew-Laplace Fit\nμ={mu_sl:.2f}, σ={std_sl:.2f}, λ={lambda_sl:.3f}",
+        label=rf"Skew-Laplace Fit\\ $\mu={mu_sl:.2f},\ \sigma={std_sl:.2f},\ \lambda={lambda_sl:.3f}$",
     )
     pdf_sl_true = skew_laplace_pdf(x, mu=0, sigma=sigma_true[0, 0], lam=skew_lambda_gt)
     # Plot the true Skew-Laplace PDF
@@ -296,9 +304,19 @@ if __name__ == "__main__":
         "-",
         linewidth=2,
         color="tab:green",
-        label=f"True Noise\nμ=0.00, σ={sigma_true[0,0]:.2f}, λ={skew_lambda_gt:.3f}",
+        label=rf"True Noise\\ $\mu=0.00,\ \sigma={sigma_true[0,0]:.2f},\ \lambda={skew_lambda_gt:.3f}$",
     )
-    axs_error.legend(fontsize=10, loc="upper right", frameon=True)
+    axs_error.legend(fontsize=14, loc="upper right", frameon=True)
+    axs_error.set_xlim(left=-0.25, right=1.4)
+    # Tick label font size
+    axs_error.tick_params(
+        axis="both",
+        labelsize=10,
+    )
+    # Axis Labels
+    axs_error.set_xlabel(rf"Range Error, $e_r$ (m)", fontsize=14)
+    axs_error.set_ylabel("Probability Density", fontsize=13)
+
     fig_error.tight_layout()
 
     noise_params = {

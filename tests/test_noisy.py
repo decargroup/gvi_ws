@@ -162,6 +162,12 @@ if __name__ == "__main__":
     # samples = sample_skew_laplace(
     #     mu=np.zeros((1, 1)), sigma=np.sqrt(np.array([[0.05]])), lam=0.1, n_samples=10000
     # )
+    # Plotting parameters
+    plt.rc("text", usetex=True)
+    plt.rc("font", family="serif", size=14)
+    plt.rc("lines", linewidth=2)
+    plt.rc("axes", grid=True)
+    plt.rc("grid", linestyle="--")
     R = np.array([[1e-2]])
     std_dev_true = np.sqrt(R)
     samples = randvec(

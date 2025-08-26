@@ -33,8 +33,8 @@ pip install -e .
 ### Running Simulations
 
 1. **Generate simulation data.** 
-   
-From the project root, run:
+
+To generate and plot simulated data, from the project root, run:
 
 ```bash
 python data/sim/generate_sim_data.py 
