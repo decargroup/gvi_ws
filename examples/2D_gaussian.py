@@ -166,7 +166,9 @@ if __name__ == "__main__":
     ###############################
     if MAP_INIT:
         esgvi_graph = esgvi_from_map(
-            map_problem=problem, cubature_method=CUB_METHOD_PROC, cubature_order=CUB_ORDER
+            map_problem=problem,
+            cubature_method=CUB_METHOD_PROC,
+            cubature_order=CUB_ORDER,
         )
     else:
         esgvi_graph = generate_esgvi_graph(
@@ -259,16 +261,14 @@ if __name__ == "__main__":
     axs.set_xlabel("Time (s)")
     axs.set_title("NEES")
     if SAVE_FIGS:
-        plt.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/2d_NEES.pdf"
-        )
+        plt.savefig(f"figs/2d/2d_NEES.pdf")
     if SHOW_FIGS:
         plt.show()
 
     # Comparison table
     print("Average Error: ")
-    print(" Method | Heading  |    X    |   Y ")
-    print("----------------------------------------")
+    print(" Method |    X    |    Y ")
+    print("---------------------------")
     print(
         f" ESGVI  | {np.mean(results_gvi.error[:,0]):.5f} | {np.mean(results_gvi.error[:,1]):.5f}"
     )

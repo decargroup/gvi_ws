@@ -6,6 +6,7 @@ scikit-sparse==0.4.16
 matplotlib==3.10.3
 seaborn==0.13.2
 navlie@ git+https://github.com/decargroup/navlie@main
+pymocap@ git+ssh://git@github.com/andrewipstirling/pymocap.git@main
 bagpy==0.5
 rosbags==0.10.10
 rospkg==1.6.0

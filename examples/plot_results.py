@@ -134,7 +134,6 @@ fig, ax = nav.plot_poses(
     step=100,
     label="MAP (Cauchy)",
     line_color="tab:blue",
-    linestyle=":",
 )
 fig, ax = nav.plot_poses(
     poses=results_gmm.state,
@@ -142,7 +141,6 @@ fig, ax = nav.plot_poses(
     ax=ax,
     label="MAP (GMM)",
     line_color="tab:purple",
-    linestyle="-.",
 )
 fig, ax = nav.plot_poses(
     poses=results_gvi.state,
@@ -150,13 +148,25 @@ fig, ax = nav.plot_poses(
     ax=ax,
     label="ESGVI",
     line_color="tab:orange",
-    linestyle="--",
 )
 fig, ax = nav.plot_poses(
     poses=ground_truth, ax=ax, step=None, label="Ground Truth", line_color="tab:green"
 )
 for l in landmarks:
     ax.plot(l[0], l[1], "x")
+
+# Override linestyles after plotting
+linestyle_map = {
+    "MAP (Cauchy)": "-",
+    "MAP (GMM)": ":",
+    "ESGVI": "-.",
+}
+
+for line in ax.get_lines():
+    label = line.get_label()
+    if label in linestyle_map:
+        line.set_linestyle(linestyle_map[label])
+
 ax.set_title("Estimated poses")
 ax.set_xlabel(r"$x$ (m)")
 ax.set_ylabel(r"$y$ (m)")

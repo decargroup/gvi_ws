@@ -11,6 +11,7 @@ Requires-Dist: scikit-sparse==0.4.16
 Requires-Dist: matplotlib==3.10.3
 Requires-Dist: seaborn==0.13.2
 Requires-Dist: navlie@ git+https://github.com/decargroup/navlie@main
+Requires-Dist: pymocap@ git+ssh://git@github.com/andrewipstirling/pymocap.git@main
 Requires-Dist: bagpy==0.5
 Requires-Dist: rosbags==0.10.10
 Requires-Dist: rospkg==1.6.0
