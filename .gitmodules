@@ -1,0 +1,4 @@
+[submodule "pymocap"]
+	path = pymocap
+	url = git@github.com:andrewipstirling/pymocap.git
+	branch = main
