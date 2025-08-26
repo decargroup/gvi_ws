@@ -1,0 +1,52 @@
+# Loading/Exporting Params
+MAX_TIME: 80
+
+
+# Export/Import Params
+DATA_PATH: "./data/real/cluttered/exported_data.pkl"
+EXP_PATH: "./data/real/cluttered"
+EXPORT_DATA: True
+
+# Choose which estimator to run
+USE_MAP: True
+USE_GMM: True
+USE_GVI: False
+
+# Data Params
+use_calibrated_uwb: True
+
+# Cluttered Params
+meas_std_dev_map: 0.32
+meas_mean_map: 0.17
+meas_std_dev_gvi: 0.14
+meas_mean_gvi: -0.02
+skew_lambda: 0.094
+
+# Cluttered Processes
+# Q_proc: [3e-2, 5e-3, 2e-3]
+Q_proc: [5e-2, 3e-3, 3e-3]
+P0_init: 1e-3
+
+# Losses
+map_loss: "cauchy"
+gvi_loss: "skew_laplace"
+
+
+# Optimization Params
+tolerance: 1e-6
+
+# GVI Params
+warmstart: True
+gvi_init_step_dist: 3e-1
+backtrack_multiplier: 0.6
+
+
+verbose: True
+gvi_iters: 10
+gvi_backtrack: 20
+
+# GMM Params (from UWB ranging figure)
+# Cluttered Params
+gmm_means: [0.04, 1.10, 0.41]
+gmm_std_devs: [0.11, 0.58, 0.20]
+gmm_weights: [0.74, 0.05, 0.21]

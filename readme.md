@@ -6,6 +6,11 @@ A Python package for exactly-sparse gaussian variational inference (ESGVI) for b
 ```
 ├── config/ # YAML configuration files for simulations and experiments
 ├── data/ # Simulation data and experiment results
+│ ├── real/ # Experimental data
+│    ├── bags # ROS bag data from experiment
+│    ├── cluttered/ # Pickled calibrated odometry, mocap, and uwb data
+│    ├── fit_skew_laplace.py # Functions to fit skew-Laplace params
+│    └── plat_raw.py # Script to plot raw/calibrated rosbag data
 │ ├── results/ # Output data/results from experiments
 │ └── sim/ # Simulation data and generator script
 ├── examples/ # Example scripts and experiment pipelines
@@ -51,6 +56,12 @@ python examples/se2_localization.py
 
 This will generate output data (pickled objects) and save them to the data/results/se2/ folder. Similarly, to change the estimator parameters, consult ``config/se2_localization.yaml``. 
 
+Similarly, to run the estimators on SE(2) with the experimental data from the `"cluttered"` dataset, use
+
+```bash
+python examples/cluttered_localization.py
+```
+
 3. **Plotting.**
 
 To plot the results, run:
@@ -58,6 +69,7 @@ To plot the results, run:
 ```bash
 python examples/plot_results.py
 ```
+Being sure to set the `DATASET` variable to either `"se2"` or `"cluttered"` in the script, depending on which results you want to visualize.
 
 ## Figures and Results
 
@@ -66,6 +78,32 @@ Plots and benchmark figures are generated into the `figs/` directory by the exam
 - RMSE and NEES performance plots.
 - Measurement comparisons given various noise models (Gaussian, Cauchy, Student-T, Skew-Laplace)
 - Estimated trajectories of the robot.
+
+
+Relevant plots appearing in the paper can be regenerated as follows:
+
+- **Raw experimental UWB data** can be visualized using  
+```bash
+python data/real/plot_raw.py
+```
+- **Estimator performance on experimental data** is plotted using
+```bash
+python examples/plot_results.py
+```
+
+Alternatively, all plots come pregenerated and can be seen here
+
+#### UWB calibrated ranges (experimental data)
+
+![UWB calibrated ranges](figs/cluttered/raw/uwb_range_error_calibrated.png)
+
+#### Estimation error with 3σ bounds
+
+![Estimation error with 3 sigma bounds](figs/cluttered/cluttered_3sigma.png)
+
+#### Ground truth trajectory with obstacles
+
+![Ground truth trajectory with obstacles](figs/cluttered/cluttered_gt_traj.png)
 
 ## Dependencies
 

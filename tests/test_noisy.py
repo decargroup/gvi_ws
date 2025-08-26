@@ -234,53 +234,7 @@ if __name__ == "__main__":
     print(gmm_means)
     print(gmm_stds)
     print(gmm_weights)
-    # Generating presentation figure
-    # x = np.linspace(-1, 4, 500)
-    # pdf_sl = skew_laplace_pdf(x, mu=-0.05, sigma=0.3, lam=0.6)
-    # pdf_gauss = scipy.stats.norm.pdf(x, 0.1, 0.17)
-    # pdf_gauss_1 = scipy.stats.norm.pdf(x, 0.5, 0.25)
-    # pdf_gauss_2 = scipy.stats.norm.pdf(x, 1, 0.35)
-    # pdf_gauss_3 = scipy.stats.norm.pdf(x, 1.5, 0.55)
 
-    # ax.plot(
-    #     x,
-    #     pdf_gauss,
-    #     "--",
-    #     linewidth=2,
-    #     color="tab:green",
-    # )
-    # ax.plot(
-    #     x,
-    #     pdf_gauss_1,
-    #     "--",
-    #     linewidth=2,
-    #     color="tab:red",
-    # )
-    # ax.plot(
-    #     x,
-    #     pdf_gauss_2,
-    #     "--",
-    #     linewidth=2,
-    #     color="tab:red",
-    # )
-    # ax.plot(
-    #     x,
-    #     pdf_gauss_3,
-    #     "--",
-    #     linewidth=2,
-    #     color="tab:red",
-    # )
-    # sl_amp = 3.5
-    # plt.fill_between(
-    #     x, pdf_sl * sl_amp, color="tab:blue", alpha=0.2, label="Skewed Covering Density"
-    # )
-    # ax.plot(
-    #     x,
-    #     pdf_sl * sl_amp,
-    #     "-",
-    #     linewidth=2,
-    #     color="tab:blue",
-    # )
     ax.legend(fontsize=10, loc="upper right", frameon=True)
     fig.tight_layout()
     plt.show()

@@ -14,6 +14,7 @@ src/gvi_ws/models/models.py
 src/gvi_ws/util/__init__.py
 src/gvi_ws/util/cubatures.py
 src/gvi_ws/util/data_generation.py
+src/gvi_ws/util/fit_skew_laplace.py
 src/gvi_ws/util/load_config.py
 src/gvi_ws/util/map_batch.py
 src/gvi_ws/util/psd.py
