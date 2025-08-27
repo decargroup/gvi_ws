@@ -330,12 +330,8 @@ if __name__ == "__main__":
         "Skew Laplace": [mu_sl, std_sl, lambda_sl],
     }
     if SAVE_FIGS:
-        fig.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/{dataset}/noise_comp.pdf"
-        )
-        fig_error.savefig(
-            f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/{dataset}/range_errors.pdf"
-        )
+        fig.savefig(f"figs/{dataset}/se2_noise_comp.pdf")
+        fig_error.savefig(f"figs/{dataset}/se2_range_errors.pdf")
     if SHOW_FIGS:
         plt.show()
     if EXPORT:

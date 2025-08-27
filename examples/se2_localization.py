@@ -174,7 +174,7 @@ if __name__ == "__main__":
                 )
 
     # DO MAP with GMM now
-    if config["USE_GVI"]:
+    if config["USE_GMM"]:
         print("Starting MAP GMM Estimation")
         gmm_means = fitted_noise_dict["GMM"][0]
         gmm_covs = np.square(fitted_noise_dict["GMM"][1])
