@@ -43,7 +43,7 @@ plt.rc("lines", linewidth=2)
 plt.rc("axes", grid=True)
 plt.rc("grid", linestyle="--")
 
-fig, ax = nav.plot_error(results_map, label="MAP")
+fig, ax = nav.plot_error(results_map, label="MAP (Cauchy)")
 ax[0].set_ylabel(r"$\theta$ (rad)")
 # Plot GMM
 ax[0].plot(
@@ -117,8 +117,8 @@ ax[2].fill_between(
 )
 ax[2].set_xlabel("Time (s)")
 ax[0].legend(loc="upper left", fontsize=7)
-ax[1].legend(loc="upper left", fontsize=7)
-ax[2].legend(loc="upper left", fontsize=7)
+# ax[1].legend(loc="upper left", fontsize=7)
+# ax[2].legend(loc="upper left", fontsize=7)
 plt.tight_layout()
 if SAVE_FIGS:
     plt.savefig(
