@@ -9,7 +9,6 @@ A Python package for exactly-sparse gaussian variational inference (ESGVI) for b
 │ ├── real/ # Experimental data
 │    ├── bags # ROS bag data from experiment
 │    ├── cluttered/ # Pickled calibrated odometry, mocap, and uwb data
-│    ├── fit_skew_laplace.py # Functions to fit skew-Laplace params
 │    └── plat_raw.py # Script to plot raw/calibrated rosbag data
 │ ├── results/ # Output data/results from experiments
 │ └── sim/ # Simulation data and generator script

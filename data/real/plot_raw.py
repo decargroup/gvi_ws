@@ -16,7 +16,7 @@ from gvi_ws.util.load_config import load_config
 from scipy.stats import norm, cauchy
 from scipy.integrate import simpson
 from scipy.interpolate import interp1d
-from fit_skew_laplace import fit_skew_laplace, skew_laplace_pdf
+from gvi_ws.util.fit_skew_laplace import fit_skew_laplace, skew_laplace_pdf
 from sklearn.mixture import GaussianMixture
 
 # Typing Stuff
