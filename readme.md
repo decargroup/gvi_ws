@@ -1,6 +1,6 @@
 # GVI Workspace
 
-A Python package for exactly-sparse gaussian variational inference (ESGVI) for batch state estimation in robotics. This workspace includes simulation tools, models, and the ESGVI solver built around the [`navlie`](https://github.com/decargroup/navlie) library.
+A Python package for exactly sparse gaussian variational inference (ESGVI) for batch state estimation in robotics. This workspace includes simulation tools, models, and the ESGVI solver built around the [`navlie`](https://github.com/decargroup/navlie) library.
 
 ## Project Structure
 ```
