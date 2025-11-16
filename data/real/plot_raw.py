@@ -45,8 +45,8 @@ PLOT_TAGS_ANCHORS = False
 PLOT_UWB = True
 
 
-bag_path = f"data/real/bags/{DATASET}.bag"
-config_path = f"data/real/bags/anchors.yaml"
+bag_path = f"data/real/bags/{DATASET}/{DATASET}.bag"
+config_path = f"data/real/bags/{DATASET}/anchors.yaml"
 agent = "Husky"
 config = load_config(config_path)
 # This goes from motive software to internal mocap representation

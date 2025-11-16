@@ -1,14 +1,14 @@
 # Noise Params
 # Data Generation
 PROC_NOISE: "gaussian"
-MEAS_NOISE: "skew_laplace"
+MEAS_NOISE: "nlos"
 
 # Measurement Noise Params
 GVI_SKEW_LAMBDA: 0.1
 GVI_T_DOF: 3.0
 
 # Robust Loss Selection
-MAP_LOSS_FUN: "cauchy"
+MAP_LOSS_FUN: "asymmetric_cauchy"
 GVI_LOSS_FUN: "skew_laplace"
 
 

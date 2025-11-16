@@ -18,9 +18,10 @@ from gvi_ws.util.cubatures import (
     spherical_cubature,
     gh_cubature,
     trans_spherical_cubature,
-    trans_gh_cubature, 
-    trans_unscented_cubature
+    trans_gh_cubature,
+    trans_unscented_cubature,
 )
+
 
 def test_unit_sigmapoints(method="gh", order=3):
     key1 = "x0"
@@ -48,17 +49,16 @@ def test_unit_sigmapoints(method="gh", order=3):
 
     gvi_sp, gvi_w = prior_fac._gen_unit_sigma_pts()
     gvi_sp = np.round(gvi_sp, 10)
-    
+
     covariance = np.identity(3) * 1e-2
     sqrt_covar = np.linalg.cholesky(covariance)
 
-    gvi_vec_sp = [
-            sqrt_covar @ sp_i.reshape((-1, 1)) for sp_i in gvi_sp
-        ]
+    gvi_vec_sp = [sqrt_covar @ sp_i.reshape((-1, 1)) for sp_i in gvi_sp]
     nav_vec_sp = sqrt_covar @ nav_sp
 
     print(gvi_vec_sp)
     print(nav_vec_sp.T)
+
     def create_weight_dict(points, weights):
         weight_dict = {}
         for point, weight in zip(points, weights):
@@ -89,6 +89,62 @@ def test_unit_sigmapoints(method="gh", order=3):
         print("Failed: Unit sigma points and weights are not equal.")
         print("Navlie Dictionary:", dict_nav)
         print("My Dictionary:", dict_gvi)
+
+
+def test_transformed_sigmapoints(method="gh", dof=2):
+    if method == "gh":
+        trans_sp, trans_w = trans_gh_cubature(state_dof=dof, order_p=3)
+        sp, w = gh_cubature(state_dof=dof, order_p=3)
+    elif method == "spherical":
+        trans_sp, trans_w = trans_spherical_cubature(state_dof=dof)
+        sp, w = spherical_cubature(state_dof=dof)
+    else:
+        trans_sp, trans_w = trans_unscented_cubature(state_dof=dof)
+        sp, w = unscented_cubature(state_dof=dof, order_p=3)
+
+    def create_weight_dict(points, weights):
+        weight_dict = {}
+        for point, weight in zip(points, weights):
+            weight = round(
+                weight, 8
+            )  # Ensure floating point precision issues don't cause mismatches
+            if weight not in weight_dict:
+                weight_dict[weight] = []
+            weight_dict[weight].append(
+                point.tolist()
+            )  # Convert to list for easy comparison
+
+        # Sort points within each weight group to ensure order-independent comparison
+        for weight in weight_dict:
+            weight_dict[weight].sort()
+
+        return weight_dict
+
+    def compare_weight_dict(dict_1: Dict, dict_2: Dict):
+        for key in dict_1.keys():
+            sp_1 = np.array(dict_1[key])
+            if key not in dict_2.keys():
+                return False
+            sp_2 = np.array(dict_2[key])
+            if not np.allclose(sp_1, sp_2):
+                return False
+        return True
+
+    dict_trans = create_weight_dict(trans_sp, trans_w)
+    dict_sph = create_weight_dict(sp, w)
+    matching = compare_weight_dict(dict_sph, dict_trans)
+    # assert matching
+    if matching:
+        print(
+            f"Passed: Unit sigma points and weights are equal for {method} and transformed points with n={dof}"
+        )
+        print("Transformed:", dict_trans)
+        print(f"{method}:", dict_sph)
+
+    if not matching:
+        print(f"Failed: Sigma points and Weights are not equal for n={dof}.")
+        print("transformed:", dict_trans)
+        print(f"{method}:", dict_sph)
 
 
 def test_student_t_sigmapoints():
@@ -124,69 +180,15 @@ def test_student_t_sigmapoints():
     # Make sure the aspect ratio is equal so the circle looks like a circle
     ax.set_aspect("equal", "box")
     ax.legend()
-    plt.savefig(
-        f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/sigmapoint_comp_gh.pdf"
-    )
+    # plt.savefig(
+    #     f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/sigmapoint_comp_gh.pdf"
+    # )
     plt.show()
 
-def test_transformed_sigmapoints(method = "gh", dof = 2):
-    if method == "gh":
-        trans_sp, trans_w = trans_gh_cubature(state_dof=dof, order_p=3)
-        sp, w = gh_cubature(state_dof=dof, order_p = 3)
-    elif method == "spherical":
-        trans_sp, trans_w = trans_spherical_cubature(state_dof=dof)
-        sp, w = spherical_cubature(state_dof=dof)
-    else:
-        trans_sp, trans_w = trans_unscented_cubature(state_dof=dof)
-        sp, w = unscented_cubature(state_dof=dof, order_p = 3)
-    
-    def create_weight_dict(points, weights):
-        weight_dict = {}
-        for point, weight in zip(points, weights):
-            weight = round(
-                weight, 8
-            )  # Ensure floating point precision issues don't cause mismatches
-            if weight not in weight_dict:
-                weight_dict[weight] = []
-            weight_dict[weight].append(
-                point.tolist()
-            )  # Convert to list for easy comparison
 
-        # Sort points within each weight group to ensure order-independent comparison
-        for weight in weight_dict:
-            weight_dict[weight].sort()
-
-        return weight_dict
-    def compare_weight_dict(dict_1:Dict, dict_2:Dict):
-        for key in dict_1.keys():
-            sp_1 = np.array(dict_1[key])
-            if key not in dict_2.keys():
-                return False
-            sp_2 = np.array(dict_2[key])
-            if not np.allclose(sp_1, sp_2):
-                return False
-        return True
-    
-    dict_trans = create_weight_dict(trans_sp, trans_w)
-    dict_sph = create_weight_dict(sp, w)
-    matching = compare_weight_dict(dict_sph, dict_trans)
-    # assert matching
-    if matching:
-        print(
-            f"Passed: Unit sigma points and weights are equal for {method} and transformed points with n={dof}"
-        )
-        print("Transformed:", dict_trans)
-        print(f"{method}:", dict_sph)
-    
-    if not matching:
-        print(f"Failed: Sigma points and Weights are not equal for n={dof}.")
-        print("transformed:", dict_trans)
-        print(f"{method}:", dict_sph)
-    
 if __name__ == "__main__":
     VERBOSE = False
     METHOD = "gh"
     ORDER = 2
     # test_unit_sigmapoints(method=METHOD, order=ORDER)
     # test_student_t_sigmapoints()
-    test_transformed_sigmapoints(method=METHOD, dof=2)

@@ -1,19 +1,20 @@
 import numpy as np
 import scipy.linalg
 import navlie as nav
+import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
 from typing import List
 from gvi_ws.graph.factors import Factor, ProcessFactor, MeasurementFactor, PriorFactor
 from gvi_ws.models.models import LaserRangeFinder, DoubleIntegrator
 from gvi_ws.util.psd import (
     force_sym_PSD,
     force_sym,
-    regularize,
-    fast_positive_definite_inverse,
 )
+from gvi_ws.util.fit_skew_laplace import skew_laplace_pdf
 from navlie.types import State, StateWithCovariance, Measurement, Input
 from navlie.lib.states import MatrixLieGroupState, SE2State, VectorState
 from navlie.filters import generate_sigmapoints
-from navlie.lib.models import BodyFrameVelocity, LinearMeasurement
+from navlie.lib.models import BodyFrameVelocity, LinearMeasurement, RangePoseToAnchor
 from navlie.batch.residuals import ProcessResidual, PriorResidual
 from navlie.batch.problem import Problem
 from navlie.filters import generate_sigmapoints
@@ -99,7 +100,7 @@ def test_vec_prior_factor(verbose=False, method="gh", order=3):
         print("Unit SP: \n", (prior_fac._unit_sigma_pts))
         print("Weights: ", prior_fac._weights)
         print("SP: \n", prior_fac._gen_sigma_pts(state_list, total_covariance))
-    
+
     # Test 1: Instance
     assert isinstance(prior_fac, PriorFactor)
 
@@ -111,7 +112,7 @@ def test_vec_prior_factor(verbose=False, method="gh", order=3):
     assert col.shape[0] == total_covariance.shape[0]
     assert matrix.shape == total_covariance.shape
     if verbose:
-        print("Col:\n" ,col)
+        print("Col:\n", col)
         print("New Info:\n", matrix)
         print("Cost:\n", cost)
 
@@ -449,7 +450,7 @@ def test_mlg_prior_proc_factor(verbose=False, method="gh", order=3):
         covar_matrix=total_covar.copy(),
         info_matrix=total_info.copy(),
     )
-    
+
     gt_mat_proc = total_info - np.block(
         [
             [force_sym(scipy.linalg.inv(P0)), np.zeros((3, 3))],
@@ -481,10 +482,160 @@ def test_mlg_prior_proc_factor(verbose=False, method="gh", order=3):
     print(f"Info update:\n{total_mat} \nEqual to ground-truth info:\n{total_info}")
 
 
+def test_mlg_meas_factor(verbose=False, method="gh", order=3):
+    key1 = "x0"
+    projection = np.identity(3)
+    state_list = [SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")]
+    print(state_list[0])
+    var_slices = {"x0": slice(0, state_list[0].dof)}
+    R_k = np.identity(1) * 1e-2
+    R_k_inv = force_sym(scipy.linalg.inv(R_k))
+    meas_model = RangePoseToAnchor(
+        anchor_position=[1, 1], tag_body_position=[0.0, 0.0], R=R_k
+    )
+    meas_val = meas_model.evaluate(state_list[0])
+    meas_gt = Measurement(value=meas_val, stamp=state_list[0].stamp, model=meas_model)
+
+    P0 = np.identity(state_list[0].dof) * 1e-3
+    meas_fac = MeasurementFactor(
+        keys=key1,
+        measurement=meas_gt,
+        variable_slices=var_slices,
+        projection=projection,
+        cubature=method,
+        order=order,
+    )
+    total_covariance = P0.copy()
+    total_information = force_sym(scipy.linalg.inv(total_covariance))
+
+    # Test 1: Instance
+    assert isinstance(meas_fac, MeasurementFactor)
+
+    sigma_pts = meas_fac._gen_sigma_pts(state_list, factor_covar=P0)
+    meas_sp = [meas_model.evaluate(sp[0]) for sp in sigma_pts]
+
+    fig, ax = plt.subplots(
+        1, 3, figsize=(12, 4), sharey=False, gridspec_kw={"wspace": 0.5}
+    )
+    ax: List[plt.Axes] = ax
+    pos = np.array([sp[0].position for sp in sigma_pts]).reshape((-1, 2))
+    print(pos)
+    ax[0].scatter(
+        pos[:, 0],
+        pos[:, 1],
+        marker="o",
+        edgecolors="tab:orange",
+        facecolors="none",
+        s=30,
+    )
+    # Eigen-decomposition of covariance
+    eigvals, eigvecs = np.linalg.eigh(
+        total_covariance[1:, 1:]
+    )  # assuming 2x2 for position
+    order = eigvals.argsort()[::-1]
+    eigvals, eigvecs = eigvals[order], eigvecs[:, order]
+
+    # 3σ radii
+    k = 3.0
+    radii = k * np.sqrt(eigvals)
+
+    # Orientation of ellipse in degrees
+    angle = np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
+
+    # Create ellipse patch
+    ellipse = Ellipse(
+        xy=[0, 0],
+        width=2 * radii[0],
+        height=2 * radii[1],
+        angle=angle,
+        edgecolor="tab:blue",
+        facecolor="none",
+        linewidth=2,
+        label=r"$3\sigma$ Bounds",
+    )
+
+    ax[0].add_patch(ellipse)
+    ax[0].set_aspect("equal", "box")
+    ax[0].legend()
+    ax[0].set_title(r"Sigma Points $\mathbf{\mathcal{X}}_k^{\ell}$")
+
+    lambda_val = 0.1
+    std_dev = np.sqrt(R_k)
+    alpha = np.sqrt(1 + np.square(lambda_val / std_dev[0, 0]))
+
+    def sl_val(x, y):
+        a = lambda_val * (y - x) / R_k[0, 0]
+        b = alpha * np.abs((y - x) / std_dev[0, 0])
+        return -1 * (a - b)
+
+    def gauss_val(x, y):
+        return 0.5 * np.square(y - x) / R_k[0, 0]
+
+    # Plot histogram of sigma-point skewed values
+    ax[1].hist(
+        np.round(meas_sp, 3),
+        bins=20,
+        weights=meas_fac._weights,
+        align="left",
+        density=False,
+        color="tab:orange",
+        alpha=0.6,
+        label="Sigma Points",
+    )
+
+    ax[1].set_title(r"Range Transform, $g(\mathbf{\mathcal{X}}_k^{\ell})$")
+    # ax[1].set_yticks([])
+    ax[1].set_ylim(bottom=0, top=0.5)
+    ax[1].set_ylabel(r"Weight, $w_{\ell}$")
+    ax[1].legend(loc="upper left", fontsize=10)
+    meas_sp_sl = np.array([sl_val(x, meas_val) for x in meas_sp])
+    # Plot histogram of sigma-point skewed values
+    ax[2].hist(
+        np.round(meas_sp_sl, 3),
+        bins=20,
+        weights=meas_fac._weights,
+        align="left",
+        density=False,
+        color="tab:orange",
+        alpha=0.6,
+        label="Skewed Sigma Points",
+    )
+
+    ax[2].set_title(r"Skew-Laplace Transform, $\phi_k(\mathbf{\mathcal{X}}_k^{\ell})$")
+    ax[2].legend(loc="upper right", fontsize=10)
+    ax[2].set_ylim(bottom=0, top=0.5)
+    ax[2].set_ylabel(r"Weight, $w_{\ell}$")
+
+    # meas_sp_g = np.array([gauss_val(x, meas_val) for x in meas_sp])
+    # # Plot histogram of sigma-point skewed values
+    # ax[3].hist(
+    #     np.round(meas_sp_g, 3),
+    #     bins=20,
+    #     weights=meas_fac._weights,
+    #     align="left",
+    #     density=False,
+    #     color="tab:orange",
+    #     alpha=0.6,
+    #     label="Gauss Sigma Points",
+    # )
+
+    # ax[3].set_title(r"Gaussian Transform, $\phi_k(\mathbf{\mathcal{X}}_k^{\ell})$")
+    # ax[3].legend()
+    # ax[3].set_ylim(bottom=0, top=0.5)
+    # ax[3].set_ylabel(r"Weight, $w_{\ell}$")
+    plt.show()
+
+
 if __name__ == "__main__":
+    # Plotting parameters
+    plt.rc("text", usetex=True)
+    plt.rc("font", family="serif", size=14)
+    plt.rc("lines", linewidth=2)
+    plt.rc("axes", grid=True)
+    plt.rc("grid", linestyle="--")
     np.random.seed(1)
     VERBOSE = False
-    METHOD = "trans_gh"
+    METHOD = "gh"
     ORDER = 3
     # print("Testing Prior Factors.")
     # test_vec_prior_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
@@ -492,7 +643,8 @@ if __name__ == "__main__":
     # print(" ----------------------- \n ")
     # print("Testing Measurement Factors.")
     # test_meas_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
+    test_mlg_meas_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
     # print(" ----------------------- \n ")
-    print("Testing Process Factors.")
+    # print("Testing Process Factors.")
     # test_vec_prior_proc_factor(verbose=True, method=METHOD, order=ORDER)
-    test_mlg_prior_proc_factor(verbose=True, method=METHOD, order=ORDER)
+    # test_mlg_prior_proc_factor(verbose=True, method=METHOD, order=ORDER)

@@ -34,7 +34,7 @@ from navlie.lib.models import (
 from navlie.lib.states import VectorInput
 from navlie.batch.losses import L2Loss, CauchyLoss
 from gvi_ws.util.fit_skew_laplace import fit_skew_laplace, skew_laplace_pdf
-from scipy.stats import norm, cauchy
+from scipy.stats import norm, cauchy, t
 from sklearn.mixture import GaussianMixture
 
 
@@ -139,7 +139,7 @@ if __name__ == "__main__":
 
     dof = 2
     state: State = VectorState
-    if dataset == "se2":
+    if dataset == "se2_sim":
         state = SE2State
         dof = 3
 
@@ -159,11 +159,15 @@ if __name__ == "__main__":
             for anchor_pos in anchor_pos_list
         ]
     elif meas_model_str == "range_pose":
-        tag_pos = np.array(gen_data_config["tag_pos"])
-        meas_model = [
-            meas_model(anchor_position=anchor_pos, tag_body_position=tag_pos, R=R_d)
-            for anchor_pos in anchor_pos_list
-        ]
+        tag_pos_list = np.array(gen_data_config["tag_pos"])
+        meas_model_list = []
+        for tag_pos in tag_pos_list:
+            for anchor_pos in anchor_pos_list:
+                meas_model_list.append(
+                    meas_model(
+                        anchor_position=anchor_pos, tag_body_position=tag_pos, R=R_d
+                    )
+                )
     meas_freq = 10
     proc_model = proc_model_dict[gen_data_config["proc_model"]]
     proc_model = proc_model(Q=Q_d)
@@ -171,19 +175,25 @@ if __name__ == "__main__":
 
     # Data Generation
     input_profile = lambda t, x: np.array([np.sin(t), np.cos(t)])
-    if dataset == "se2":
+    if dataset == "se2_sim":
         # Input Profile
         input_profile = lambda t, x: np.array([np.cos(0.1 * t), 1.0, 0])
 
     # Data Params
     np.random.seed(config["SEED"])
     MAX_TIME = gen_data_config["max_time"]
-    NOISE = config["NOISE"]
+    # Generate data with noise flag
+    USE_NOISE = config["NOISE"]
 
     # Noise Params
     PROC_NOISE = noise_config["PROC_NOISE"]
     MEAS_NOISE = noise_config["MEAS_NOISE"]
+    nlos_flag = False
+    if MEAS_NOISE == "nlos":
+        MEAS_NOISE = "gaussian"
+        nlos_flag = True
     skew_lambda_gt = float(noise_config["GVI_SKEW_LAMBDA"])
+    t_dof_gt = float(noise_config["GVI_T_DOF"])
 
     # Script Params
     SAVE_FIGS = gen_data_config["save_figs"]
@@ -196,29 +206,42 @@ if __name__ == "__main__":
         input_func=input_profile,
         input_covariance=Q_d,
         input_freq=proc_freq,
-        meas_model_list=meas_model,
+        meas_model_list=meas_model_list,
         meas_freq_list=meas_freq,
         process_noise_type="gaussian",
         measurement_noise_type="gaussian",
     )
+
     # Other Heavy-Tailed Noise Generation
     dg_heavy = DataGenerator(
         process_model=proc_model,
         input_func=input_profile,
         input_covariance=Q_d,
         input_freq=proc_freq,
-        meas_model_list=meas_model,
+        meas_model_list=meas_model_list,
         meas_freq_list=meas_freq,
         process_noise_type=PROC_NOISE,
         measurement_noise_type=MEAS_NOISE,
     )
 
     gt_data, input_data_gauss, meas_data_gauss = dg_gaussian.generate(
-        x0.copy(), 0, MAX_TIME, noise=NOISE
+        x0.copy(), 0, MAX_TIME, noise=USE_NOISE
     )
     _, input_data_heavy, meas_data_heavy = dg_heavy.generate(
-        x0.copy(), 0, MAX_TIME, noise=NOISE
+        x0.copy(), 0, MAX_TIME, noise=USE_NOISE
     )
+    if nlos_flag:
+        nlos_percent = 0.25
+        nlos_indx = np.random.choice(
+            len(meas_data_heavy),
+            int(nlos_percent * len(meas_data_heavy)),
+            replace=False,
+        )
+        std_dev = np.sqrt(R0_mult)
+        for i in nlos_indx:
+            nlos_inc = np.random.uniform(1 * std_dev, 6 * std_dev)
+            meas_data_heavy[i].value = meas_data_heavy[i].value + nlos_inc
+
     fig, axs = plt.subplots(1, 2, sharey=True)
     fig_gauss, ax_gauss = nav.plot_meas(meas_data_gauss, state_list=gt_data, axs=axs[0])
     ax_gauss[0].set_title(f"Gaussian Range Measurements")
@@ -226,6 +249,8 @@ if __name__ == "__main__":
     ax_gauss[0].set_ylabel(f"Range (m)")
     fig_dual, ax_heavy = nav.plot_meas(meas_data_heavy, state_list=gt_data, axs=axs[1])
     ax_heavy[0].set_title(f"{MEAS_NOISE.capitalize()} Range Measurements")
+    if nlos_flag:
+        ax_heavy[0].set_title(f"NLOS Range Measurements")
     ax_heavy[0].set_xlabel(f"Time (s)")
     low, up = ax_heavy[0].get_ylim()
     ax_gauss[0].set_ybound(low, up)
@@ -296,18 +321,33 @@ if __name__ == "__main__":
         color="tab:orange",
         label=rf"Skew-Laplace Fit\\ $\mu={mu_sl:.2f},\ \sigma={std_sl:.2f},\ \lambda={lambda_sl:.3f}$",
     )
-    pdf_sl_true = skew_laplace_pdf(x, mu=0, sigma=sigma_true[0, 0], lam=skew_lambda_gt)
-    # Plot the true Skew-Laplace PDF
-    axs_error.plot(
-        x,
-        pdf_sl_true,
-        "-",
-        linewidth=2,
-        color="tab:green",
-        label=rf"True Noise\\ $\mu=0.00,\ \sigma={sigma_true[0,0]:.2f},\ \lambda={skew_lambda_gt:.3f}$",
-    )
+    if MEAS_NOISE == "skew_laplace":
+        pdf_sl_true = skew_laplace_pdf(
+            x, mu=0, sigma=sigma_true[0, 0], lam=skew_lambda_gt
+        )
+        # Plot the true Skew-Laplace PDF
+        axs_error.plot(
+            x,
+            pdf_sl_true,
+            "-",
+            linewidth=2,
+            color="tab:green",
+            label=rf"True Noise\\ $\mu=0.00,\ \sigma={sigma_true[0,0]:.2f},\ \lambda={skew_lambda_gt:.3f}$",
+        )
+        axs_error.set_xlim(left=-0.25, right=1.4)
+    elif MEAS_NOISE == "student_t":
+        pdf_t_true = t.pdf(x, t_dof_gt, loc=0, scale=sigma_true[0, 0])
+        axs_error.plot(
+            x,
+            pdf_t_true,
+            "-",
+            linewidth=2,
+            color="tab:green",
+            label=rf"True Noise\\ $\mu=0.00,\ \sigma={sigma_true[0,0]:.2f},\ \nu={t_dof_gt:.3f}$",
+        )
+        axs_error.set_xlim(left=-1, right=1)
     axs_error.legend(fontsize=14, loc="upper right", frameon=True)
-    axs_error.set_xlim(left=-0.25, right=1.4)
+
     # Tick label font size
     axs_error.tick_params(
         axis="both",
@@ -330,15 +370,17 @@ if __name__ == "__main__":
         "Skew Laplace": [mu_sl, std_sl, lambda_sl],
     }
     if SAVE_FIGS:
-        fig.savefig(f"figs/{dataset}/se2_noise_comp.pdf")
-        fig_error.savefig(f"figs/{dataset}/se2_range_errors.pdf")
+        fig.savefig(f"figs/{dataset}/{MEAS_NOISE}/se2_noise_comp.pdf")
+        fig_error.savefig(f"figs/{dataset}/{MEAS_NOISE}/se2_range_errors.pdf")
     if SHOW_FIGS:
         plt.show()
     if EXPORT:
         # Save inputs
         os.makedirs(EXP_PATH, exist_ok=True)
 
-        save_path = os.path.join(EXP_PATH, f"meas_data_{dataset}.pkl")
+        save_path = os.path.join(EXP_PATH, f"meas_data_{dataset}_{MEAS_NOISE}.pkl")
+        if nlos_flag:
+            save_path = os.path.join(EXP_PATH, f"meas_data_{dataset}_nlos.pkl")
         with open(save_path, "wb") as f:
             pickle.dump(
                 {
@@ -347,7 +389,7 @@ if __name__ == "__main__":
                     "meas_data_non_gauss": meas_data_heavy,
                     "meas_data_gauss": meas_data_gauss,
                     "process_model": proc_model,
-                    "meas_model": meas_model,
+                    "meas_model": meas_model_list,
                     "x0": x0,
                     "P0": P0,
                     "fitted_noise_params": noise_params,

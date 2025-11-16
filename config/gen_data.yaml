@@ -1,8 +1,8 @@
-dataset: "se2"
+dataset: "se2_sim"
 max_time: 20
 
 P0_mult: 1e-3
-R0_mult: 1e-2
+R0_mult: 1e-1
 
 # se2
 Q0_mult: [0.01, 0.1, 0.05]
@@ -21,8 +21,8 @@ meas_model: "range_pose" # "range_point"
 
 anchor_pos: [[2, 1], [0, 1], [2, 0]]
 # Tag Body Pos
-tag_pos: [0.1, 0.1]
+tag_pos: [[0.1, 0.1], [-0.1, 0.1]]
 
-save_figs: True
+save_figs: False
 show_figs: True
-export: False
+export: True

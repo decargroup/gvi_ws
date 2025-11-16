@@ -1,0 +1,38 @@
+# Loading/Exporting Params
+MAX_TIME: 100
+TRIAL_NUM: 1
+
+
+# Export/Import Params
+DATA_PATH: "./data/real/multi"
+EXPORT_DATA: False
+
+# Choose which estimator to run
+USE_MAP: True
+USE_GMM: True
+USE_GVI: True
+
+# Cluttered Processes
+# Q_proc: [3e-2, 5e-3, 2e-3]
+Q_proc: [8e-3, 5e-2, 5e-2] # Trial 0
+# Q_proc: [5e-3, 1e-2, 1e-2]
+P0_init: 1e-3
+
+# Losses
+map_loss: "asymmetric_cauchy"
+gvi_loss: "skew_laplace"
+
+
+# Optimization Params
+tolerance: 1e-4
+
+# GVI Params
+warmstart: True
+gvi_init_step_dist: 3e-1
+backtrack_multiplier: 0.6
+
+
+verbose: True
+gvi_iters: 10
+gvi_backtrack: 20
+

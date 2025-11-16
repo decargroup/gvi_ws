@@ -1,0 +1,29 @@
+# Parameters for SE2 Localization Example
+
+# Simulation Params
+SEED: 1
+T_END: 4.0
+NOISE: true # Whether generate data with noise
+USE_FIT: true
+SP_METHOD_PROC: "gh" # Sigma point method for process/prior factors.
+SP_METHOD_MEAS: "gh" # Sigma point method for measurement factors.
+CUB_ORDER: 3
+MAP_INIT: false
+TIME_IT: false
+
+# ESGVI Params
+VERBOSE: true
+MAX_ITERS: 5
+BACK_ITERS: 0
+INIT_STEP_SIZE: 1e-10
+STEP_TOL: 1e-6
+
+# Script Params
+SAVE_FIGS: false
+SHOW_FIGS: true
+
+# Results params
+USE_MAP: true
+USE_GVI: true
+USE_GMM: true
+EXPORT: true

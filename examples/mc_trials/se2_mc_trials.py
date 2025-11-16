@@ -18,7 +18,7 @@ from navlie.lib.models import (
     PointRelativePosition,
     RangePoseToAnchor,
 )
-from navlie.batch.losses import CauchyLoss, L2Loss
+from navlie.batch.losses import CauchyLoss, L2Loss, AsymmetricCauchyLoss
 from gvi_ws.util.load_config import load_config
 from gvi_ws.graph.losses import SkewLaplaceLoss, GaussianLoss, StudentTLoss
 from typing import List, Tuple
@@ -28,20 +28,20 @@ from gvi_ws.util.data_generation import DataGenerator
 if __name__ == "__main__":
     # MC Params
     MC_TRIALS = 50
-    T_TRIAL = 3.5
+    T_TRIAL = 4
     np.random.seed(0)
     MEAS_MODEL = "range_pose"
-    MEAS_NOISE = "skew_laplace"
+    MEAS_NOISE = "nlos"
 
     # Flags to control whether each result should be updated
     update_gmm = True
-    update_map = False
-    update_gvi = False
+    update_map = True
+    update_gvi = True
 
     folder = "./data/results/monte_carlo"
     os.makedirs(folder, exist_ok=True)
 
-    filename = f"mc_{int(MC_TRIALS)}_trials_{T_TRIAL}s.pkl"
+    filename = f"mc_{int(MC_TRIALS)}_trials_{T_TRIAL}s_{MEAS_NOISE}_1.pkl"
     save_path = os.path.join(folder, filename)
 
     # Load existing results if file exists
@@ -51,13 +51,14 @@ if __name__ == "__main__":
     else:
         existing_results = {}
 
-    config = load_config("config/se2_localization.yaml")
+    config = load_config("config/se2_sim_localization.yaml")
     noise_config = load_config("config/noise_config.yaml")
 
     # Load GMM fit parameters
-    DATA_PATH = "./data/sim/meas_data_se2.pkl"
+    DATA_PATH = f"./data/sim/meas_data_se2_sim_{MEAS_NOISE}.pkl"
     with open(DATA_PATH, "rb") as f:
         data = pickle.load(f)
+
     fitted_noise_dict = data["fitted_noise_params"]
 
     # Simulation Params
@@ -83,10 +84,17 @@ if __name__ == "__main__":
 
     if MAP_LOSS_FUN == "cauchy":
         MAP_LOSS_FUN = CauchyLoss()
+    elif MAP_LOSS_FUN == "asymmetric_cauchy":
+        c_pos = float(fitted_noise_dict["Asymmetric Cauchy"][1])
+        c_neg = float(fitted_noise_dict["Asymmetric Cauchy"][2])
+        MAP_LOSS_FUN = AsymmetricCauchyLoss(c_pos, c_neg)
     else:
         MAP_LOSS_FUN = L2Loss()
     if GVI_LOSS_FUN == "skew_laplace":
-        gvi_skew_lambda = float(noise_config["GVI_SKEW_LAMBDA"])
+        # gvi_skew_lambda = float(noise_config["GVI_SKEW_LAMBDA"])
+        gvi_covar = float(fitted_noise_dict["Skew Laplace"][1]) ** 2
+        gvi_skew_lambda = float(fitted_noise_dict["Skew Laplace"][2])
+        print(gvi_skew_lambda)
         GVI_LOSS_FUN = SkewLaplaceLoss(lamb=gvi_skew_lambda)
     elif GVI_LOSS_FUN == "student_t":
         gvi_t_dof = float(noise_config["GVI_T_DOF"])
@@ -98,7 +106,7 @@ if __name__ == "__main__":
     X0_TRUE_GVI = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
     X0_TRUE_MAP = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
     X0_TRUE_GMM = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
-    P0 = np.identity(3) * 1e-5
+    P0 = np.identity(3) * 1e-3
 
     # Init landmarks
     landmark_positions = [[2, 1], [0, 1], [2, 0]]
@@ -111,15 +119,16 @@ if __name__ == "__main__":
     Q_d = np.diag([0.1**2, 0.1, 0.05])
     proc_model = BodyFrameVelocity(Q=Q_d)
     proc_model_freq = 100
+    R = 1e-1
     # Meas Model
     if MEAS_MODEL == "range":
-        R_d = np.identity(1) * 1e-2
+        R_d = np.identity(1) * R
 
         meas_models_gen = [
             RangePointToAnchor(anchor_position=l.value, R=R_d) for l in landmark_states
         ]
     elif MEAS_MODEL == "relative_pos":
-        R_d = np.identity(2) * 1e-2
+        R_d = np.identity(2) * R
         meas_models_gen = [
             PointRelativePosition(
                 landmark_position=np.array([l.value]), R=R_d, landmark_id="l0"
@@ -127,17 +136,25 @@ if __name__ == "__main__":
             for l in landmark_states
         ]
     elif MEAS_MODEL == "range_pose":
-        tag_pos = np.array([0.1, 0.1])
-        R_d = np.identity(1) * 1e-2
-        meas_models_gen = [
-            RangePoseToAnchor(anchor_position=l.value, tag_body_position=tag_pos, R=R_d)
-            for l in landmark_states
-        ]
+        tag_pos = np.array([[0.1, 0.1]])
+        R_d = np.identity(1) * R
+        meas_models_gen = []
+        for tag in tag_pos:
+            for l in landmark_states:
+                meas_models_gen.append(
+                    RangePoseToAnchor(
+                        anchor_position=l.value, tag_body_position=tag, R=R_d
+                    )
+                )
 
+    # Measurement Frequency
     meas_model_freq = 10
-
     # Input Profile
     input_profile = lambda t, x: np.array([np.cos(0.1 * t), 1.0, 0])
+
+    meas_noise = MEAS_NOISE
+    if MEAS_NOISE == "nlos":
+        meas_noise = "gaussian"
 
     # Data Generation
     dg = DataGenerator(
@@ -148,8 +165,21 @@ if __name__ == "__main__":
         meas_model_list=meas_models_gen,
         meas_freq_list=[meas_model_freq] * len(meas_models_gen),
         process_noise_type="gaussian",
-        measurement_noise_type=MEAS_NOISE,
+        measurement_noise_type=meas_noise,
     )
+
+    def make_nlos_noise(meas_data: List[Measurement]) -> List[Measurement]:
+        nlos_percent = 0.25
+        nlos_indx = np.random.choice(
+            len(meas_data),
+            int(nlos_percent * len(meas_data)),
+            replace=False,
+        )
+        std_dev = np.sqrt(R)
+        for i in nlos_indx:
+            nlos_inc = np.random.uniform(1 * std_dev, 6 * std_dev)
+            meas_data[i].value = meas_data[i].value + nlos_inc
+        return meas_data
 
     def run_esgvi_trial(trial_num: int) -> nav.GaussianResultList:
         np.random.seed(trial_num)
@@ -157,6 +187,12 @@ if __name__ == "__main__":
         gt_data, input_data, meas_data = dg.generate(
             X0_TRUE_GVI.copy(), start=0.0, stop=T_TRIAL, noise=True
         )
+        if MEAS_NOISE == "nlos":
+            meas_data = make_nlos_noise(meas_data)
+
+        for meas in meas_data:
+            meas.model._R = np.array([gvi_covar])
+
         x0_check = X0_TRUE_GVI.plus(nav.randvec(P0))
         gvi_problem, init_pose_est = construct_planar_map(
             x0=x0_check.copy(),
@@ -220,6 +256,9 @@ if __name__ == "__main__":
         gt_data, input_data, meas_data = dg.generate(
             X0_TRUE_MAP.copy(), start=0.0, stop=T_TRIAL, noise=True
         )
+        if MEAS_NOISE == "nlos":
+            meas_data = make_nlos_noise(meas_data)
+
         std_dev_gauss = fitted_noise_dict["Gaussian"][1]
         for meas in meas_data:
             meas.model._R = np.array([std_dev_gauss**2])
@@ -262,21 +301,17 @@ if __name__ == "__main__":
 
     def run_gmm_trial(trial_num: int) -> nav.GaussianResultList:
         np.random.seed(trial_num)
-        # print("MAP: ", trial_num)
-        # gmm_means = fitted_noise_dict["GMM"][0]
-        # gmm_covs = np.square(fitted_noise_dict["GMM"][1])
-        # gmm_weights = fitted_noise_dict["GMM"][2]
-
-        gmm_means = np.array([0.06329292, 0.72206901, 0.33444155])
-        gmm_covs = np.square(np.array([0.08593795, 0.32732129, 0.14407507]))
-        gmm_weights = np.array([0.61686321, 0.09095258, 0.29218421])
-        # gmm_means = np.array([0.32488561, 0.06051794, 0.6747335])
-        # gmm_covs = np.square(np.array([0.14457706, 0.08320876, 0.35730603]))
-        # gmm_weights = np.array([0.29810484, 0.59954923, 0.10234593])
+        # print("MAP (GMM): ", trial_num)
+        gmm_means = fitted_noise_dict["GMM"][0]
+        gmm_covs = np.square(fitted_noise_dict["GMM"][1])
+        gmm_weights = fitted_noise_dict["GMM"][2]
 
         gt_data, input_data, meas_data = dg.generate(
             X0_TRUE_GMM.copy(), start=0.0, stop=T_TRIAL, noise=True
         )
+        if MEAS_NOISE == "nlos":
+            meas_data = make_nlos_noise(meas_data)
+
         x0_check = X0_TRUE_GMM.plus(nav.randvec(P0))
         problem, init_pose_est = construct_gmm_map(
             x0=x0_check.copy(),

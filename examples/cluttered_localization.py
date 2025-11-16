@@ -68,6 +68,7 @@ if USE_CALIB:
 else:
     meas_data_map: List[Measurement] = data["meas_data"]
     meas_data_gvi: List[Measurement] = data["meas_data"]
+
 meas_stamps = [meas.stamp for meas in meas_data_map]
 gt_data: List[SE2State] = data["ground_truth"]
 gt_stamps = [gt.stamp for gt in gt_data]
@@ -89,6 +90,7 @@ for match in match_inputs_meas:
 
     measurements_map.append(meas_map)
     measurements_gvi.append(meas_gvi)
+
 match_inputs_gt = nav.associate_stamps(input_stamps, gt_stamps, max_difference=0.01)
 ground_truth = []
 for match in match_inputs_gt:
