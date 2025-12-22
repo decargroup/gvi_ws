@@ -6,18 +6,19 @@ A Python package for exactly sparse gaussian variational inference (ESGVI) for b
 ```
 ├── config/ # YAML configuration files for simulations and experiments
 ├── data/ # Simulation data and experiment results
-│ ├── real/ # Experimental data
+│ ├── real/ # Experimental data, with raw bags 
 │    ├── bags # ROS bag data from experiment
 │    ├── cluttered/ # Pickled calibrated odometry, mocap, and uwb data
-│    └── plat_raw.py # Script to plot raw/calibrated rosbag data
+│    └── multi/ # Pickled data from the multi dataset
 │ ├── results/ # Output data/results from experiments
 │ └── sim/ # Simulation data and generator script
 ├── examples/ # Example scripts and experiment pipelines
 ├── figs/ # Generated plots and figures
+├── tests/ # Unit tests
+├── src/ # ESGVI source code
 ├── pyproject.toml # Project metadata and dependencies
-├── readme.md # Project documentation
-├── src/ # Source code
-└── tests/ # Unit tests
+└── readme.md # Project documentation
+
 ```
 
 ## Installation
