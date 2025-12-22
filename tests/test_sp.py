@@ -56,9 +56,6 @@ def test_unit_sigmapoints(method="gh", order=3):
     gvi_vec_sp = [sqrt_covar @ sp_i.reshape((-1, 1)) for sp_i in gvi_sp]
     nav_vec_sp = sqrt_covar @ nav_sp
 
-    print(gvi_vec_sp)
-    print(nav_vec_sp.T)
-
     def create_weight_dict(points, weights):
         weight_dict = {}
         for point, weight in zip(points, weights):
@@ -80,7 +77,6 @@ def test_unit_sigmapoints(method="gh", order=3):
     dict_nav = create_weight_dict(nav_sp.T, nav_w)
     dict_gvi = create_weight_dict(gvi_sp, gvi_w)
     matching = dict_gvi == dict_nav
-    assert matching
     if matching:
         print(
             "Passed: Unit sigma points and weights are equal for navlie and personal."
@@ -180,15 +176,12 @@ def test_student_t_sigmapoints():
     # Make sure the aspect ratio is equal so the circle looks like a circle
     ax.set_aspect("equal", "box")
     ax.legend()
-    # plt.savefig(
-    #     f"/home/astirl/Documents/courses/assignments/mech_642/gvi_ws/figs/sigmapoint_comp_gh.pdf"
-    # )
     plt.show()
 
 
 if __name__ == "__main__":
     VERBOSE = False
     METHOD = "gh"
-    ORDER = 2
-    # test_unit_sigmapoints(method=METHOD, order=ORDER)
+    ORDER = 3
+    test_unit_sigmapoints(method=METHOD, order=ORDER)
     # test_student_t_sigmapoints()

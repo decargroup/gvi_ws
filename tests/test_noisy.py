@@ -158,10 +158,7 @@ def plot_cov_ellipse(
 
 
 if __name__ == "__main__":
-
-    # samples = sample_skew_laplace(
-    #     mu=np.zeros((1, 1)), sigma=np.sqrt(np.array([[0.05]])), lam=0.1, n_samples=10000
-    # )
+    # Fitting noise parameters
     # Plotting parameters
     plt.rc("text", usetex=True)
     plt.rc("font", family="serif", size=14)

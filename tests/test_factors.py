@@ -486,7 +486,6 @@ def test_mlg_meas_factor(verbose=False, method="gh", order=3):
     key1 = "x0"
     projection = np.identity(3)
     state_list = [SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")]
-    print(state_list[0])
     var_slices = {"x0": slice(0, state_list[0].dof)}
     R_k = np.identity(1) * 1e-2
     R_k_inv = force_sym(scipy.linalg.inv(R_k))
@@ -519,7 +518,6 @@ def test_mlg_meas_factor(verbose=False, method="gh", order=3):
     )
     ax: List[plt.Axes] = ax
     pos = np.array([sp[0].position for sp in sigma_pts]).reshape((-1, 2))
-    print(pos)
     ax[0].scatter(
         pos[:, 0],
         pos[:, 1],
@@ -638,13 +636,12 @@ if __name__ == "__main__":
     METHOD = "gh"
     ORDER = 3
     # print("Testing Prior Factors.")
-    # test_vec_prior_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
-    # test_mlg_prior_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
-    # print(" ----------------------- \n ")
-    # print("Testing Measurement Factors.")
-    # test_meas_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
+    test_vec_prior_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
+    test_mlg_prior_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
+    print(" ----------------------- \n ")
+    print("Testing Measurement Factors.")
+    test_meas_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
     test_mlg_meas_factor(verbose=VERBOSE, method=METHOD, order=ORDER)
-    # print(" ----------------------- \n ")
-    # print("Testing Process Factors.")
-    # test_vec_prior_proc_factor(verbose=True, method=METHOD, order=ORDER)
-    # test_mlg_prior_proc_factor(verbose=True, method=METHOD, order=ORDER)
+    print(" ----------------------- \n ")
+    print("Testing Process Factors.")
+    test_vec_prior_proc_factor(verbose=True, method=METHOD, order=ORDER)

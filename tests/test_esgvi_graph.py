@@ -24,7 +24,6 @@ from navlie.lib.models import (
     PointRelativePosition,
 )
 from navlie.batch.residuals import ProcessResidual
-import jax.numpy as jnp
 
 
 def test_build_graph(end_time, noise=True, verbose=False, method="gh", order=3):
@@ -199,7 +198,6 @@ def test_build_graph(end_time, noise=True, verbose=False, method="gh", order=3):
 
 
 def test_esgvi_update():
-
     # Init Prior
     x0 = SE2State(value=np.array([0, 0, 0]), stamp=0.0, state_id="x0")
     P0 = np.identity(3) * 1e-5
