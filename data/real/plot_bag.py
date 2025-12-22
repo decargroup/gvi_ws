@@ -33,23 +33,28 @@ plt.rc("axes", grid=True)
 plt.rc("grid", linestyle="--")
 sns.set_theme(style="whitegrid")
 
-DATASET = "cluttered"  # TODO: Include more datasets later
-EXP_PATH = f"./data/real/{DATASET}/exported_data.pkl"
+# TODO: Include more datasets later
+DATASET = "multi"  # "cluttered" # "multi"
+ID = 9
+EXP_PATH = f"./data/real/{DATASET}/exported_data_{ID}.pkl"
 EXPORT_DATA = False
 
 # Plotting Params
-SAVE_FIGS = True
-PLOT_ODOM = False
+SAVE_FIGS = False
+PLOT_ODOM = True
 PLOT_MOCAP = False
 PLOT_TAGS_ANCHORS = False
 PLOT_UWB = True
 
 
-bag_path = f"data/real/bags/{DATASET}/{DATASET}.bag"
+bag_path = f"data/real/bags/{DATASET}/{DATASET}_{ID}.bag"
+if DATASET == "cluttered":
+    # cluttered dataset only has 1 trajectory
+    bag_path = f"data/real/bags/{DATASET}/{DATASET}.bag"
 config_path = f"data/real/bags/{DATASET}/anchors.yaml"
 agent = "Husky"
 config = load_config(config_path)
-# This goes from motive software to internal mocap representation
+# This goes from motive software to mocap streaming representation
 C_mocap_motive = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])
 
 # EXTRACT DATA
@@ -126,6 +131,7 @@ if PLOT_ODOM:
 R_oh, t_om_O = odom.calibrate(mocap, compute_pos_offset=True)
 R_ho = R_oh.T
 mocap = mocap.rotate_body_frame(R_ho)
+
 t_translation = np.array([0.32536226, -0.30953877, 0.00398481])
 for t in tags:
     t.position = (R_oh @ t.position.T).T  # - t_om_O
@@ -292,9 +298,7 @@ if PLOT_UWB:
 
         logprob = gmm.score_samples(x.reshape((-1, 1)))
         pdf_gmm = np.exp(logprob)
-        # print("Means:", gmm.means_.flatten())
-        # print("Std Devs:", np.sqrt(gmm.covariances_.flatten()))
-        # print("Weights:", gmm.weights_)
+
         # Plot PDFs on ax1
         ax_b.plot(
             x,
@@ -342,7 +346,7 @@ if PLOT_UWB:
         # Axis Labels
         ax_b.set_xlabel(rf"Range Error, $e_r$ (m)", fontsize=14)
         ax_b.set_ylabel("Probability Density", fontsize=13)
-        ax_b.set_xlim(left=-0.5, right=1.4)
+        ax_b.set_xlim(left=-0.5, right=3)
 
         # Tick label font size
         ax_b.tick_params(axis="both", labelsize=10)
