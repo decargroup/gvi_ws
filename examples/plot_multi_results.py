@@ -199,13 +199,13 @@ for i, (r_map, r_gmm, r_gvi) in enumerate(
         [
             {
                 "Trial": i,
-                "Method": "MAP (Cauchy)",
+                "Method": "MAP-C",
                 "Metric": "RMSE (rad)",
                 "Value": rmse_rad_map,
             },
             {
                 "Trial": i,
-                "Method": "MAP (GMM)",
+                "Method": "MAP-GMM",
                 "Metric": "RMSE (rad)",
                 "Value": rmse_rad_gmm,
             },
@@ -217,24 +217,24 @@ for i, (r_map, r_gmm, r_gvi) in enumerate(
             },
             {
                 "Trial": i,
-                "Method": "MAP (Cauchy)",
+                "Method": "MAP-C",
                 "Metric": "RMSE (m)",
                 "Value": rmse_map,
             },
             {
                 "Trial": i,
-                "Method": "MAP (GMM)",
+                "Method": "MAP-GMM",
                 "Metric": "RMSE (m)",
                 "Value": rmse_gmm,
             },
             {"Trial": i, "Method": "ESGVI", "Metric": "RMSE (m)", "Value": rmse_gvi},
             {
                 "Trial": i,
-                "Method": "MAP (Cauchy)",
+                "Method": "MAP-C",
                 "Metric": "aNEES",
                 "Value": anees_map,
             },
-            {"Trial": i, "Method": "MAP (GMM)", "Metric": "aNEES", "Value": anees_gmm},
+            {"Trial": i, "Method": "MAP-GMM", "Metric": "aNEES", "Value": anees_gmm},
             {"Trial": i, "Method": "ESGVI", "Metric": "aNEES", "Value": anees_gvi},
         ]
     )
@@ -256,8 +256,8 @@ df = pd.DataFrame(data)
 
 # Colors of each method
 method_colors = {
-    "MAP (Cauchy)": "tab:blue",
-    "MAP (GMM)": "tab:purple",
+    "MAP-C": "tab:blue",
+    "MAP-GMM": "tab:purple",
     "ESGVI": "tab:orange",
 }
 

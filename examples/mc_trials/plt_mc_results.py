@@ -45,7 +45,7 @@ plt.rc("grid", linestyle="--")
 fig, ax = nav.plot_nees(
     results=results_map,
     confidence_interval=None,
-    label="MAP (Cauchy)",
+    label="MAP-C",
     color="tab:blue",
     normalize=True,
 )
@@ -53,7 +53,7 @@ fig, ax = nav.plot_nees(
     results=results_gmm,
     ax=ax,
     confidence_interval=None,
-    label="MAP (GMM)",
+    label="MAP-GMM",
     color="tab:purple",
     normalize=True,
 )
@@ -88,10 +88,10 @@ print("Estimation Performance")
 print("   Method    | RMSE (rad) |  RMSE (m)  |  aNEES")
 print("------------------------------------------------")
 print(
-    f" MAP (Cauchy)|  {np.mean(results_map.rmse[:,0]):.4f}   |  {np.mean(results_map.rmse[:,1:]):.4f}   |  {(np.mean(results_map.average_nees/results_map.dof)):.3f}"
+    f" MAP-C|  {np.mean(results_map.rmse[:,0]):.4f}   |  {np.mean(results_map.rmse[:,1:]):.4f}   |  {(np.mean(results_map.average_nees/results_map.dof)):.3f}"
 )
 print(
-    f" MAP (GMM)   |  {np.mean(results_gmm.rmse[:,0]):.4f}   |  {np.mean(results_gmm.rmse[:,1:]):.4f}   |  {(np.mean(results_gmm.average_nees/results_gmm.dof)):.3f}"
+    f" MAP-GMM   |  {np.mean(results_gmm.rmse[:,0]):.4f}   |  {np.mean(results_gmm.rmse[:,1:]):.4f}   |  {(np.mean(results_gmm.average_nees/results_gmm.dof)):.3f}"
 )
 
 print(
@@ -122,8 +122,8 @@ data = []
 # and average_nees is a 1D array (per trial or per time step)
 
 methods = [
-    ("MAP (Cauchy)", results_map),
-    ("MAP (GMM)", results_gmm),
+    ("MAP-C", results_map),
+    ("MAP-GMM", results_gmm),
     ("ESGVI", results_gvi),
 ]
 
@@ -145,8 +145,8 @@ df = pd.DataFrame(data)
 # Define consistent colors per method
 # -------------------------------------------------------------
 method_colors = {
-    "MAP (Cauchy)": "tab:blue",
-    "MAP (GMM)": "tab:purple",
+    "MAP-C": "tab:blue",
+    "MAP-GMM": "tab:purple",
     "ESGVI": "tab:orange",
 }
 

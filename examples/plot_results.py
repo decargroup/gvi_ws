@@ -1,18 +1,15 @@
 import numpy as np
-import scipy.linalg
 import navlie as nav
-import timeit
 import matplotlib.pyplot as plt
-import cProfile
 
 from navlie import GaussianResultList, State, Measurement
 from typing import List, Tuple
 import pickle
 import os
 
-DATASET = "multi"  # "multi"  # "se2_sim"
+DATASET = "cluttered"  # "multi" # "se2_sim"
 MEAS_NOISE = "nlos"  # "skew_laplace"
-ROT_GT = True
+ROT_GT = False
 fname = "results.pkl"
 save_fname = ""
 
@@ -23,7 +20,7 @@ elif DATASET == "cluttered":
     results_path = DATASET
 
 elif DATASET == "multi":
-    TRIAL_NUM = 5
+    TRIAL_NUM = 6
     results_path = DATASET
     fname = f"results_{TRIAL_NUM}.pkl"
     save_fname = f"_{TRIAL_NUM}"
@@ -65,18 +62,24 @@ plt.rc("grid", linestyle="--")
 
 # Override linestyles after plotting
 linestyle_map = {
-    "MAP (Cauchy)": "-.",
-    "MAP (GMM)": "-.",
+    "MAP-C": "-.",
+    "MAP-GMM": "-.",
     "ESGVI": "-.",
 }
+linecolor_map = {
+    "MAP-C": "tab:blue",
+    "MAP-GMM": "tab:purple",
+    "ESGVI": "tab:orange",
+    "GT": "tab:green",
+}
 
-fig, ax = nav.plot_error(results_map, label="MAP (Cauchy)")
+fig, ax = nav.plot_error(results_map, label="MAP-C")
 ax[0].set_ylabel(r"$\theta$ (rad)")
 # Plot GMM
 ax[0].plot(
     results_gmm.stamp,
     results_gmm.error[:, 0],
-    label="MAP (GMM)",
+    label="MAP-GMM",
     linestyle="--",
     color="tab:purple",
 )
@@ -90,7 +93,7 @@ ax[0].fill_between(
 ax[1].plot(
     results_gmm.stamp,
     results_gmm.error[:, 1],
-    label="MAP (GMM)",
+    label="MAP-GMM",
     linestyle="--",
     color="tab:purple",
 )
@@ -104,7 +107,7 @@ ax[1].fill_between(
 ax[2].plot(
     results_gmm.stamp,
     results_gmm.error[:, 2],
-    label="MAP (GMM)",
+    label="MAP-GMM",
     linestyle="--",
     color="tab:purple",
 )
@@ -164,31 +167,28 @@ if SHOW_FIGS:
 fig, ax = nav.plot_poses(
     poses=results_map.state,
     step=None,
-    label="MAP (Cauchy)",
-    line_color="tab:blue",
+    label="MAP-C",
 )
 fig, ax = nav.plot_poses(
     poses=results_gmm.state,
     step=None,
     ax=ax,
-    label="MAP (GMM)",
-    line_color="tab:purple",
+    label="MAP-GMM",
 )
 fig, ax = nav.plot_poses(
     poses=results_gvi.state,
     step=None,
     ax=ax,
     label="ESGVI",
-    line_color="tab:orange",
 )
-fig, ax = nav.plot_poses(
-    poses=ground_truth, ax=ax, step=500, label="Ground Truth", line_color="tab:green"
-)
-
+fig, ax = nav.plot_poses(poses=ground_truth, ax=ax, step=500, label="GT")
+# Change linestyle and colors outside of navlie
 for line in ax.get_lines():
     label = line.get_label()
     if label in linestyle_map:
         line.set_linestyle(linestyle_map[label])
+    if label in linecolor_map:
+        line.set_color(linecolor_map[label])
 
 for i, l in enumerate(landmarks):
     if i == 0:
@@ -217,7 +217,7 @@ ax.scatter(
 ax.set_title("Estimated poses")
 ax.set_xlabel(r"$x$ (m)")
 ax.set_ylabel(r"$y$ (m)")
-ax.legend(loc="upper right")
+ax.legend(loc="upper right", fontsize=10)
 plt.tight_layout()
 if SAVE_FIGS:
     plt.savefig(f"./figs/{results_path}/traj_sl_{skew_lambda:.2f}{save_fname}.pdf")
@@ -226,13 +226,13 @@ if SHOW_FIGS:
 
 # Plot NEES
 fig, axs = nav.plot_nees(
-    results_map, label="MAP (Cauchy)", confidence_interval=None, normalize=True
+    results_map, label="MAP-C", confidence_interval=None, normalize=True
 )
 
 fig, axs = nav.plot_nees(
     results_gmm,
     ax=axs,
-    label="MAP (GMM)",
+    label="MAP-GMM",
     confidence_interval=None,
     color="tab:purple",
     normalize=True,
@@ -266,28 +266,23 @@ if ROT_GT:
     rotated_poses_gmm = [rotate_pose(p, R) for p in results_gmm.state]
     rotated_poses_gvi = [rotate_pose(p, R) for p in results_gvi.state]
 
-    fig, ax = nav.plot_poses(
-        poses=rotated_poses_gt, step=1200, label="Ground-Truth", line_color="tab:green"
-    )
+    fig, ax = nav.plot_poses(poses=rotated_poses_gt, step=1200, label="GT")
     fig, ax = nav.plot_poses(
         poses=rotated_poses_map,
         step=None,
-        label="MAP (Cauchy)",
-        line_color="tab:blue",
+        label="MAP-C",
         ax=ax,
     )
     fig, ax = nav.plot_poses(
         poses=rotated_poses_gmm,
         step=None,
-        label="MAP (GMM)",
-        line_color="tab:purple",
+        label="MAP-GMM",
         ax=ax,
     )
     fig, ax = nav.plot_poses(
         poses=rotated_poses_gvi,
         step=None,
         label="ESGVI",
-        line_color="tab:orange",
         ax=ax,
     )
 
@@ -322,9 +317,11 @@ if ROT_GT:
         label = line.get_label()
         if label in linestyle_map:
             line.set_linestyle(linestyle_map[label])
+        if label in linecolor_map:
+            line.set_color(linecolor_map[label])
 
     if DATASET == "cluttered":
-        ax.legend()
+        ax.legend(fontsize=8)
         ax.plot([1.3, 1.3], [-1.7, -1.3], color="grey", linewidth=5, label="metal")
         ax.text(1.3, -1.9, "metal", color="black", fontsize=10)
 
@@ -357,7 +354,7 @@ if ROT_GT:
         plt.subplots_adjust(
             left=0.1, bottom=0.02, right=0.975, top=0.975, wspace=0.01, hspace=0.1
         )
-        ax.legend(loc="best")
+        ax.legend(loc="best", fontsize=10)
 
     if SAVE_FIGS:
         plt.savefig(f"figs/{results_path}/traj_sl_{skew_lambda:.2f}{save_fname}.pdf")
